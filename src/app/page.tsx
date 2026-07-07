@@ -141,7 +141,7 @@ export default function ExamPage() {
     if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
   };
 
-  const transcribeAudio = async (blob: Blob, q: Question) => {
+  const transcribeAudio = async (blob: Blob) => {
     if (!APP_CONFIG.enableBackend) {
       showToast('当前为演示模式，语音转文字未启用');
       return;
@@ -153,17 +153,8 @@ export default function ExamPage() {
       const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.message || '转写失败');
-      const updated = saveAnswer(data.text, Math.round(data.duration || 0));
+      saveAnswer(data.text, Math.round(data.duration || 0));
       showToast('语音转文字完成');
-      if (updated[q.id]?.transcript) {
-        setTimeout(() => {
-          if (currentIdx < totalQuestions - 1) {
-            setCurrentIdx(currentIdx + 1);
-          } else {
-            showToast('本题已保存，可以提交全部题目了');
-          }
-        }, 400);
-      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : '语音转文字失败');
     } finally {
@@ -181,7 +172,7 @@ export default function ExamPage() {
       mr.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         stream.getTracks().forEach(t => t.stop());
-        await transcribeAudio(blob, currentQuestion);
+        await transcribeAudio(blob);
       };
       mr.start();
       mediaRecorderRef.current = mr;
