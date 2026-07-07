@@ -207,7 +207,7 @@ export default function ExamPage() {
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.message || '评分失败');
-        result = data.report;
+        result = { ...data.report, candidate };
       } else {
         result = makeLocalReport(candidate, QUESTIONS, Object.values(answers));
       }
@@ -245,7 +245,7 @@ export default function ExamPage() {
   };
 
   const filteredReports = adminFilter
-    ? reports.filter(r => r.candidate.code.includes(adminFilter) || r.candidate.name.includes(adminFilter) || r.candidate.department.includes(adminFilter))
+    ? reports.filter(r => r.candidate && (r.candidate.code?.includes(adminFilter) || r.candidate.name?.includes(adminFilter) || r.candidate.department?.includes(adminFilter)))
     : reports;
 
   const renderEntry = () => (
@@ -371,9 +371,9 @@ export default function ExamPage() {
           <header>
             <div>
               <div className="pill">评分报告</div>
-              <h2 style={{ marginTop: 8 }}>{report.candidate.name} · {report.candidate.department}</h2>
+              <h2 style={{ marginTop: 8 }}>{report.candidate?.name || ''} · {report.candidate?.department || ''}</h2>
             </div>
-            <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>考试码：{report.candidate.code}</div>
+            <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>考试码：{report.candidate?.code || ''}</div>
           </header>
           <div className="body">
             <div className="result-head" style={{ marginBottom: 20 }}>
@@ -467,12 +467,12 @@ export default function ExamPage() {
                 <tbody>
                   {filteredReports.map((r, i) => (
                     <tr key={i}>
-                      <td>{r.candidate.name}</td>
-                      <td>{r.candidate.department}</td>
-                      <td>{r.candidate.code}</td>
+                      <td>{r.candidate?.name || '-'}</td>
+                      <td>{r.candidate?.department || '-'}</td>
+                      <td>{r.candidate?.code || '-'}</td>
                       <td>{r.total}</td>
                       <td><span className="pill" style={{ background: gradeColor(r.grade), color: '#fff' }}>{r.grade}</span></td>
-                      <td>{r.flags.length > 0 ? r.flags.map((f, j) => <span key={j} className={pillClassForFlag(f)}>{f.text}</span>) : '-'}</td>
+                      <td>{(r.flags || []).length > 0 ? (r.flags || []).map((f, j) => <span key={j} className={pillClassForFlag(f)}>{f.text}</span>) : '-'}</td>
                       <td>{formatTime(r.createdAt)}</td>
                     </tr>
                   ))}
