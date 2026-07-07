@@ -1,453 +1,498 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { QUESTIONS, CONFIG, type Question, type Candidate, type Answer, type Report } from "@/lib/exam-data";
-import { makeLocalReport } from "@/lib/scoring";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { QUESTIONS, type Answer, type Candidate, type Question, type Report, type Flag } from '@/lib/exam-data';
+import { makeLocalReport } from '@/lib/scoring';
 
-/* ── helpers ── */
-const esc = (s: string) => String(s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" } as Record<string, string>)[m]);
-const pick = (type: string): Question => {
-  const pool = QUESTIONS.filter(q => q.type === type);
-  return pool[Math.floor(Math.random() * pool.length)];
+type PageKey = 'exam' | 'admin';
+type ExamStage = 'entry' | 'answer' | 'report';
+
+const STORAGE_KEY = 'yse_internal_exam_reports_v1';
+const APP_CONFIG = {
+  enableBackend: true,
+  apiBaseUrl: '',
+  examCode: 'YSPK2026',
+  examTitle: '幼师口袋销售暑期培训模拟考核',
+  examSubtitle: '1v1 销售场景 · 产品认知 / 客户沟通 / 方案呈现 / 风险把控',
 };
-const fmt = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
 
-function mockTranscript(q: Question): string {
-  return `我先理解一下，贵园现在关注的是${q.tags[0]}背后的真实工作问题。请问目前这件事主要由谁负责？老师是在什么流程里完成，频率大概多久一次？现在最卡的是专业判断、资料整理、家长沟通，还是成果沉淀？如果这个问题解决，您希望看到的成功标准是什么？
-
-基于您的描述，我不会直接说我们有某个功能就能解决，而是先把需求拆成场景、角色、流程、痛点和期望结果。现有能力上，我们可以用园本库、成长档案、家园沟通和AI资料整理帮助园所把过程证据沉淀下来；如果涉及${q.tags[0]}的深度工具，我们可以作为规划方向和共创样本进一步评估，不会把未来功能当成已经上线的能力承诺。
-
-后续我会把这个需求整理成产品反馈卡，包括客户原话、真实使用场景、老师工作流程、出现频率、成功标准和可复制性判断。`;
+function formatTime(ts: string | number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function reportMd(r: Report): string {
-  return [
-    `# ${r.candidate.name} AI销售模拟考官报告`, "",
-    `- 总分：${r.total}`, `- 等级：${r.grade}`, `- 结论：${r.conclusion}`, "",
-    "## 维度得分", "|评分项|得分|评价|证据|", "|---|---:|---|---|",
-    ...r.dimensions.map(d => `|${d.name}|${d.score}/${d.max}|${d.comment}|${d.evidence}|`),
-    "", "## 优势", ...r.strengths.map(x => `- ${x}`),
-    "", "## 补强", ...r.weaknesses.map(x => `- ${x}`)
-  ].join("\n");
+function loadReports(): Report[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
-function download(name: string, text: string, type = "text/plain;charset=utf-8") {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type }));
-  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+function saveReports(reports: Report[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
 }
 
-/* ── Toast ── */
-function Toast({ text, onDone }: { text: string; onDone: () => void }) {
-  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, [text, onDone]);
-  return <div className="toast">{text}</div>;
+function gradeColor(grade: string): string {
+  if (grade === 'S') return 'var(--teal)';
+  if (grade === 'A') return '#1d7a4a';
+  if (grade === 'B') return 'var(--blue)';
+  if (grade === 'C') return 'var(--amber)';
+  return 'var(--rose)';
 }
 
-/* ── Loading Overlay ── */
-function LoadingOverlay({ text }: { text: string }) {
-  return (
-    <div className="loading-overlay">
-      <div className="loading-card">
-        <div className="spinner" />
-        <p style={{ margin: 0, color: "#657186", fontSize: 14 }}>{text}</p>
-      </div>
-    </div>
-  );
+function pillClassForFlag(flag: Flag): string {
+  if (flag.type === 'risk') return 'pill risk';
+  if (flag.type === 'warning') return 'pill warn';
+  return 'pill';
 }
 
-/* ── Main Page ── */
 export default function ExamPage() {
-  const [page, setPage] = useState<"exam" | "admin">("exam");
-  const [stage, setStage] = useState<"entry" | "answer" | "report">("entry");
-  const [candidate, setCandidate] = useState<Candidate | null>(null);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>([]);
+  const [page, setPage] = useState<PageKey>('exam');
+  const [stage, setStage] = useState<ExamStage>('entry');
+  const [candidate, setCandidate] = useState<Candidate>({ name: '', department: '', code: APP_CONFIG.examCode });
+  const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [currentIdx, setCurrentIdx] = useState(0);
   const [report, setReport] = useState<Report | null>(null);
-  const [toast, setToast] = useState("");
-  const [loading, setLoading] = useState("");
-  const [seconds, setSeconds] = useState(0);
-  const [adminReports, setAdminReports] = useState<Report[]>([]);
+  const [toast, setToast] = useState<string>('');
+  const [loading, setLoading] = useState<{ show: boolean; title: string; desc?: string }>({ show: false, title: '' });
+  const [recording, setRecording] = useState(false);
+  const [recordingQ, setRecordingQ] = useState<string | null>(null);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [adminFilter, setAdminFilter] = useState<string>('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const transcriptRef = useRef<HTMLTextAreaElement>(null);
 
-  const showToast = useCallback((t: string) => setToast(t), []);
+  const currentQuestion = QUESTIONS[currentIdx];
+  const totalQuestions = QUESTIONS.length;
 
-  /* timer for recording */
+  const metrics = useMemo(() => {
+    const total = reports.length;
+    const passCount = reports.filter(r => ['S', 'A', 'B'].includes(r.grade)).length;
+    const avgScore = total > 0 ? Math.round(reports.reduce((sum, r) => sum + r.total, 0) / total) : 0;
+    const riskCount = reports.filter(r => r.flags.length > 0).length;
+    return { total, passCount, avgScore, riskCount };
+  }, [reports]);
+
   useEffect(() => {
-    if (stage === "answer" && seconds > 0) {
-      // seconds is managed via state
-    }
-  }, [seconds, stage]);
+    setReports(loadReports());
+  }, []);
 
-  /* fetch admin reports when switching to admin */
   useEffect(() => {
-    if (page === "admin") {
-      fetch("/api/reports")
-        .then(r => r.json())
-        .then(data => { if (data.ok) setAdminReports(data.data || []); })
-        .catch(() => {});
-    }
-  }, [page]);
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(''), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
-  /* recording */
+  const showToast = (msg: string) => setToast(msg);
+
+  const showLoading = (title: string, desc?: string) => setLoading({ show: true, title, desc });
+  const hideLoading = () => setLoading({ show: false, title: '' });
+
+  const startExam = () => {
+    if (!candidate.name.trim() || !candidate.department.trim()) {
+      showToast('请先填写姓名和部门');
+      return;
+    }
+    setStage('answer');
+    setCurrentIdx(0);
+    setAnswers({});
+    setReport(null);
+  };
+
+  const resetExam = () => {
+    setStage('entry');
+    setCandidate({ name: '', department: '', code: APP_CONFIG.examCode });
+    setAnswers({});
+    setCurrentIdx(0);
+    setReport(null);
+  };
+
+  const saveAnswer = (transcript: string, duration?: number) => {
+    const answer: Answer = {
+      questionId: currentQuestion.id,
+      transcript,
+      duration: duration || 0,
+      audioCaptured: true,
+    };
+    const updated = { ...answers, [currentQuestion.id]: answer };
+    setAnswers(updated);
+    return updated;
+  };
+
+  const goNext = () => {
+    const answer = answers[currentQuestion.id];
+    if (!answer || !answer.transcript.trim()) {
+      showToast('请至少粘贴或输入一段逐字稿后再前进');
+      return;
+    }
+    if (currentIdx < totalQuestions - 1) {
+      setCurrentIdx(currentIdx + 1);
+    }
+  };
+
+  const goPrev = () => {
+    if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
+  };
+
+  const transcribeAudio = async (blob: Blob, q: Question) => {
+    if (!APP_CONFIG.enableBackend) {
+      showToast('当前为演示模式，语音转文字未启用');
+      return;
+    }
+    showLoading('正在语音转文字', '已识别到录音，正在生成逐字稿');
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'recording.wav');
+      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.message || '转写失败');
+      const updated = saveAnswer(data.text, Math.round(data.duration || 0));
+      showToast('语音转文字完成');
+      if (updated[q.id]?.transcript) {
+        setTimeout(() => {
+          if (currentIdx < totalQuestions - 1) {
+            setCurrentIdx(currentIdx + 1);
+          } else {
+            showToast('本题已保存，可以提交全部题目了');
+          }
+        }, 400);
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '语音转文字失败');
+    } finally {
+      hideLoading();
+    }
+  };
+
   const startRecording = async () => {
+    if (recording) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      chunksRef.current = [];
-      setSeconds(0);
       const mr = new MediaRecorder(stream);
-      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
+      chunksRef.current = [];
+      mr.ondataavailable = (e: BlobEvent) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        await transcribeAudio(blob, currentQuestion);
+      };
       mr.start();
       mediaRecorderRef.current = mr;
-      mediaStreamRef.current = stream;
-      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
-      showToast("录音已开始。");
+      setRecording(true);
+      setRecordingQ(currentQuestion.id);
     } catch {
-      showToast("无法启动录音，请直接输入或粘贴逐字稿。");
+      showToast('无法访问麦克风，请检查浏览器权限');
     }
   };
 
   const stopRecording = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach(t => t.stop());
-    mediaRecorderRef.current = null;
-    mediaStreamRef.current = null;
-    showToast("录音已停止。");
+    if (!recording || !mediaRecorderRef.current) return;
+    mediaRecorderRef.current.stop();
+    setRecording(false);
+    setRecordingQ(null);
   };
 
-  const transcribeAudio = async () => {
-    if (chunksRef.current.length === 0) {
-      showToast("没有录音数据，请先录音。");
+  const submitAll = async () => {
+    const answeredCount = Object.keys(answers).length;
+    if (answeredCount < totalQuestions) {
+      showToast(`还有 ${totalQuestions - answeredCount} 题未作答`);
       return;
     }
-    setLoading("正在 AI 转写音频...");
+    showLoading('AI 正在评分', '正在根据评分标准、产品知识包和逐字稿生成结构化报告');
     try {
-      const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" });
-      const form = new FormData();
-      form.append("audio", blob, "recording.webm");
-      form.append("candidateName", candidate?.name || "");
-      form.append("questionId", questions[index]?.id || "");
-      form.append("examCode", candidate?.code || CONFIG.examCode);
-
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
-      const data = await res.json();
-      if (data.ok && data.text) {
-        if (transcriptRef.current) transcriptRef.current.value = data.text;
-        showToast("转写完成。");
+      let result: Report;
+      if (APP_CONFIG.enableBackend) {
+        const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ candidate, questions: QUESTIONS, answers }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.message || '评分失败');
+        result = data.report;
       } else {
-        showToast(data.message || "转写失败，请手动输入逐字稿。");
+        result = makeLocalReport(candidate, QUESTIONS, Object.values(answers));
       }
-    } catch {
-      showToast("转写服务不可用，请手动输入逐字稿。");
-    } finally {
-      setLoading("");
-    }
-  };
+      const savedReport: Report = { ...result, createdAt: new Date().toISOString() };
+      setReport(savedReport);
+      const updated = [...reports, savedReport];
+      setReports(updated);
+      saveReports(updated);
 
-  /* submit current question */
-  const submitQuestion = async () => {
-    const transcript = (transcriptRef.current?.value || "").trim();
-    if (!transcript) { showToast("请先填写逐字稿。"); return; }
-    const q = questions[index];
-    const newAnswers = [...answers];
-    newAnswers[index] = { questionId: q.id, transcript, duration: seconds, audioCaptured: seconds > 0 };
-    setAnswers(newAnswers);
-    setSeconds(0);
-
-    if (index < questions.length - 1) {
-      setIndex(index + 1);
-    } else {
-      /* all questions done → score */
-      await generateReport(candidate!, questions, newAnswers);
-    }
-  };
-
-  const generateReport = async (cand: Candidate, qs: Question[], ans: Answer[]) => {
-    setLoading("AI 正在评分...");
-    try {
-      const res = await fetch("/api/score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidate: { name: cand.name, department: cand.department, examCode: cand.code || CONFIG.examCode },
-          questions: qs.map(q => ({ id: q.id, type: q.type, text: q.prompt, score: 20 })),
-          answers: Object.fromEntries(ans.map(a => [a.questionId, { transcript: a.transcript, duration: a.duration }]))
-        })
-      });
-      const data = await res.json();
-      if (data.ok && data.report) {
-        const aiReport: Report = {
-          id: "R-" + Date.now(),
-          createdAt: new Date().toISOString(),
-          candidate: cand,
-          questions: qs.map(q => ({ id: q.id, title: q.title, type: q.type, tags: q.tags })),
-          answers: ans,
-          dimensions: data.report.dimensions || [],
-          total: data.report.total || 0,
-          grade: data.report.grade || "E",
-          conclusion: data.report.conclusion || "",
-          strengths: data.report.strengths || [],
-          weaknesses: data.report.weaknesses || [],
-          flags: data.report.flags || [],
-          source: "ai"
-        };
-        /* save to DB */
+      if (APP_CONFIG.enableBackend) {
         try {
-          await fetch("/api/reports", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+          await fetch(`${APP_CONFIG.apiBaseUrl}/api/reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              candidate: { name: cand.name, department: cand.department, examCode: cand.code || CONFIG.examCode },
-              questions: aiReport.questions,
-              answers: ans,
-              report: aiReport,
-              source: "ai",
-              createdAt: aiReport.createdAt
-            })
+              candidate_name: candidate.name,
+              candidate_department: candidate.department,
+              exam_code: candidate.code,
+              questions: QUESTIONS,
+              answers,
+              report: savedReport,
+              source: result.source || 'ai',
+            }),
           });
-        } catch { /* save failed, report still shows */ }
-        setReport(aiReport);
-        setStage("report");
-      } else {
-        throw new Error(data.message || "AI 评分失败");
+        } catch {
+          // ignore
+        }
       }
-    } catch {
-      /* fallback to local scoring */
-      const localReport = makeLocalReport(cand, qs, ans);
-      setReport(localReport);
-      setStage("report");
-      showToast("AI 评分不可用，已使用本地规则兜底。");
+      setStage('report');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '评分失败');
     } finally {
-      setLoading("");
+      hideLoading();
     }
   };
 
-  /* demo mode */
-  const loadDemo = () => {
-    const cand = { name: "演示销售", department: "B端销售", code: "DEMO" };
-    const qs = ["A", "B", "C"].map(pick);
-    setCandidate(cand);
-    setQuestions(qs);
-    const demoAnswers = qs.map(q => ({ questionId: q.id, transcript: mockTranscript(q), duration: 180, audioCaptured: false }));
-    setAnswers(demoAnswers);
-    const r = makeLocalReport(cand, qs, demoAnswers);
-    setReport(r);
-    setStage("report");
-  };
+  const filteredReports = adminFilter
+    ? reports.filter(r => r.candidate.code.includes(adminFilter) || r.candidate.name.includes(adminFilter) || r.candidate.department.includes(adminFilter))
+    : reports;
 
-  /* start exam */
-  const handleStart = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const f = (e.target as HTMLFormElement).elements;
-    const name = (f.namedItem("name") as HTMLInputElement).value.trim();
-    const department = (f.namedItem("department") as HTMLInputElement).value.trim();
-    const code = (f.namedItem("code") as HTMLInputElement).value.trim();
-    if (CONFIG.requireExamCode && code !== CONFIG.examCode) { showToast("考试码不正确。"); return; }
-    const cand = { name, department, code };
-    const qs = ["A", "B", "C"].map(pick);
-    setCandidate(cand);
-    setQuestions(qs);
-    setAnswers([]);
-    setIndex(0);
-    setStage("answer");
-  };
-
-  const restart = () => { setStage("entry"); setIndex(0); setAnswers([]); setReport(null); };
-
-  const exportCsv = () => {
-    const rows = [["姓名", "部门", "总分", "等级", "题目", "日期"], ...adminReports.map(r => [r.candidate.name, r.candidate.department || "", String(r.total), r.grade, r.questions.map(q => q.id).join("/"), new Date(r.createdAt).toLocaleString("zh-CN")])];
-    download("AI销售模拟考官成绩表.csv", "\uFEFF" + rows.map(row => row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n"), "text/csv;charset=utf-8");
-  };
-
-  /* ── Render: Entry ── */
   const renderEntry = () => (
     <div className="grid two">
-      <section className="card">
-        <header><div><h2>开始一轮模拟考核</h2><p className="muted">系统将随机抽取 A/B/C 三类题各 1 题。</p></div><span className="pill warn">AI 评分版</span></header>
+      <div className="card">
+        <header>
+          <div>
+            <div className="pill">考试入场</div>
+            <h2 style={{ marginTop: 8 }}>{APP_CONFIG.examTitle}</h2>
+          </div>
+          <div className="pill warn">内部培训</div>
+        </header>
         <div className="body">
-          <form id="startForm" className="form" onSubmit={handleStart}>
-            <label>销售姓名<input name="name" placeholder="请输入姓名" required /></label>
-            <label>部门/小组<input name="department" placeholder="如 华东区 / B端销售" /></label>
-            <label>考试码<input name="code" placeholder={`如 ${CONFIG.examCode}`} /></label>
-            <div className="btns">
-              <button className="btn primary" type="submit">开始随机抽题</button>
-              <button className="btn" type="button" onClick={loadDemo}>载入演示作答</button>
-            </div>
-          </form>
+          <div className="form">
+            <label>
+              <span>考生姓名</span>
+              <input value={candidate.name} onChange={e => setCandidate({ ...candidate, name: e.target.value })} placeholder="例如：张晓燕" />
+            </label>
+            <label>
+              <span>所属部门/战区</span>
+              <input value={candidate.department} onChange={e => setCandidate({ ...candidate, department: e.target.value })} placeholder="例如：华东B端销售组" />
+            </label>
+            <label>
+              <span>考试码</span>
+              <input value={candidate.code} onChange={e => setCandidate({ ...candidate, code: e.target.value })} />
+            </label>
+          </div>
+          <div className="btns" style={{ marginTop: 16 }}>
+            <button className="btn primary" onClick={startExam}>开始考试</button>
+            <button className="btn" onClick={() => setPage('admin')}>进入管理复盘</button>
+          </div>
+          <p className="muted" style={{ marginTop: 14, fontSize: 13 }}>
+            说明：本页面为考试入口页。开始考试后将逐题作答，支持录音转文字或手动粘贴逐字稿。
+          </p>
         </div>
-      </section>
-      <aside className="card">
-        <header><div><h2>考核口径</h2><p className="muted">总分100分，结果进入管理复盘。</p></div></header>
+      </div>
+      <div className="card">
+        <header>
+          <div>
+            <div className="pill">考试说明</div>
+            <h2 style={{ marginTop: 8 }}>考前须知</h2>
+          </div>
+        </header>
         <div className="body">
           <ul className="list">
-            <li><b>先问诊：</b>追问角色、流程、已有做法、痛点和期望结果。</li>
-            <li><b>再匹配：</b>连接产品、服务、培训和共创。</li>
-            <li><b>守边界：</b>现有能力、规划方向和可共创内容必须说清楚。</li>
-            <li><b>能反馈：</b>把客户表达整理成产品反馈卡。</li>
+            <li>本次考核共 <strong>{totalQuestions} 题</strong>，覆盖产品认知、客户沟通、方案呈现、风险把控。</li>
+            <li>每题建议作答 <strong>2-4 分钟</strong>，总时长约 40 分钟。</li>
+            <li>可使用麦克风录音，系统会自动转成逐字稿；也可以直接粘贴准备好的话术。</li>
+            <li>提交后，AI 会按评分标准生成结构化报告，主管可在管理复盘页查看。</li>
           </ul>
         </div>
-      </aside>
+      </div>
     </div>
   );
 
-  /* ── Render: Answer ── */
-  const renderAnswer = () => {
-    const q = questions[index];
-    if (!q) return null;
+  const renderAnswer = () => (
+    <div className="grid two">
+      <div className="card">
+        <header>
+          <div>
+            <div className="pill">第 {currentIdx + 1} / {totalQuestions} 题</div>
+            <h2 style={{ marginTop: 8 }}>{currentQuestion.title}</h2>
+          </div>
+          <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>{currentQuestion.type}</div>
+        </header>
+        <div className="body">
+          <p className="muted" style={{ marginBottom: 12 }}>{currentQuestion.prompt}</p>
+          <div className="tags">
+            {currentQuestion.tags.map(tag => <span key={tag} className="tag">{tag}</span>)}
+          </div>
+          <label style={{ marginTop: 18 }}>
+            <span>逐字稿</span>
+            <textarea
+              value={answers[currentQuestion.id]?.transcript || ''}
+              onChange={e => setAnswers({ ...answers, [currentQuestion.id]: { ...answers[currentQuestion.id], questionId: currentQuestion.id, transcript: e.target.value, duration: answers[currentQuestion.id]?.duration || 0, audioCaptured: false } })}
+              placeholder="在此粘贴或输入你的回答..."
+            />
+          </label>
+          <div className="btns" style={{ marginTop: 14 }}>
+            <button className={`btn ${recording && recordingQ === currentQuestion.id ? 'danger' : 'ghost'}`} onClick={recording ? stopRecording : startRecording}>
+              {recording && recordingQ === currentQuestion.id ? '停止录音' : '开始录音'}
+            </button>
+            <button className="btn" onClick={goPrev} disabled={currentIdx === 0}>上一题</button>
+            <button className="btn" onClick={goNext} disabled={currentIdx === totalQuestions - 1}>下一题</button>
+            <button className="btn primary" onClick={submitAll} disabled={Object.keys(answers).length < totalQuestions}>
+              提交全部题目
+            </button>
+          </div>
+          <p className="muted" style={{ marginTop: 14, fontSize: 13 }}>
+            提示：录音会自动转成逐字稿。如果识别不准确，可以手动修改。
+          </p>
+        </div>
+      </div>
+      <div className="card">
+        <header>
+          <div>
+            <div className="pill">答题进度</div>
+            <h2 style={{ marginTop: 8 }}>已完成 {Object.keys(answers).length} / {totalQuestions}</h2>
+          </div>
+        </header>
+        <div className="body">
+          <div className="track" style={{ marginBottom: 16 }}>
+            <div className="fill" style={{ width: `${(Object.keys(answers).length / totalQuestions) * 100}%` }} />
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {QUESTIONS.map((q, idx) => (
+              <div key={q.id} className="question" style={{ padding: 12, background: answers[q.id] ? '#f0f9ff' : '#fbfcff' }}>
+                <strong style={{ fontSize: 12 }}>第 {idx + 1} 题 · {q.type === 'A' ? '产品认知' : q.type === 'B' ? '客户沟通' : '方案呈现'}</strong>
+                <p style={{ fontSize: 14, marginTop: 4 }}>{q.title.slice(0, 40)}...</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderReport = () => {
+    if (!report) return null;
     return (
       <div className="grid two">
-        <section className="card">
+        <div className="card">
           <header>
-            <div><h2>{q.id} {esc(q.title)}</h2><p className="muted">{candidate?.name}，第 {index + 1} / {questions.length} 题</p></div>
-            <span className="pill" id="clock">{fmt(seconds)}</span>
+            <div>
+              <div className="pill">评分报告</div>
+              <h2 style={{ marginTop: 8 }}>{report.candidate.name} · {report.candidate.department}</h2>
+            </div>
+            <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>考试码：{report.candidate.code}</div>
           </header>
           <div className="body">
-            {q.customer && <div className="question"><strong>客户台词</strong><p>{esc(q.customer)}</p></div>}
-            <div className="question" style={{ marginTop: 12 }}>
-              <strong>销售任务</strong><p>{esc(q.prompt)}</p>
-              <div className="tags">{q.tags.map(t => <span key={t} className="tag">{esc(t)}</span>)}</div>
+            <div className="result-head" style={{ marginBottom: 20 }}>
+              <div className="grade" style={{ background: gradeColor(report.grade) }}>
+                <strong>{report.grade}</strong>
+                <span>{report.total} 分</span>
+              </div>
+              <div>
+                <h3 style={{ marginTop: 0 }}>{report.conclusion}</h3>
+                <p className="muted" style={{ fontSize: 13 }}>评分来源：{report.source === 'ai' ? 'AI 大模型' : '本地规则'}</p>
+              </div>
             </div>
-            <h3>逐字稿 / 现场记录</h3>
-            <textarea ref={transcriptRef} placeholder="可录音后点击 AI 转写，或直接输入现场记录。" defaultValue="" />
-            <div className="btns" style={{ marginTop: 12 }}>
-              <button className="btn primary" onClick={startRecording}>开始录音</button>
-              <button className="btn danger" onClick={stopRecording}>停止录音</button>
-              <button className="btn ghost" onClick={transcribeAudio}>AI转写音频</button>
-              <button className="btn" onClick={() => { if (transcriptRef.current) transcriptRef.current.value = mockTranscript(q); showToast("已生成模拟逐字稿。"); }}>生成模拟转写</button>
-              <button className="btn primary" onClick={submitQuestion}>提交本题</button>
-            </div>
-            <p className="muted">录音后点击 &quot;AI转写音频&quot; 进行语音转文字；若不可用，请直接粘贴逐字稿。</p>
+            <h3>维度得分</h3>
+            {report.dimensions.map(dim => (
+              <div key={dim.key} className="bar">
+                <div><span>{dim.name}</span><span>{dim.score} / {dim.max}</span></div>
+                <div className="track"><div className="fill" style={{ width: `${(dim.score / dim.max) * 100}%` }} /></div>
+              </div>
+            ))}
+            <h3>优势项</h3>
+            <ul className="list">{report.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            <h3>待改进</h3>
+            <ul className="list">{report.weaknesses.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            {report.flags.length > 0 && (
+              <>
+                <h3>风险标记</h3>
+                <div className="tags">{report.flags.map((f, i) => <span key={i} className={pillClassForFlag(f)}>{f.text}</span>)}</div>
+              </>
+            )}
           </div>
-        </section>
-        <aside className="card">
-          <header><div><h2>评分提醒</h2><p className="muted">答题时尽量覆盖这些要点。</p></div></header>
+        </div>
+        <div className="card">
+          <header>
+            <div>
+              <div className="pill">操作</div>
+              <h2 style={{ marginTop: 8 }}>考试完成</h2>
+            </div>
+          </header>
           <div className="body">
-            <h3>必须追问</h3>
-            <ul className="list">{(q.mustAsk || ["这个问题现在由谁负责？", "希望看到什么变化？"]).map((x, i) => <li key={i}>{esc(x)}</li>)}</ul>
-            <h3>产品连接</h3>
-            <div className="tags">{q.links?.map(x => <span key={x} className="tag">{esc(x)}</span>)}</div>
+            <p>恭喜完成本次模拟考核！报告已保存，主管可在管理复盘页查看。</p>
+            <div className="btns" style={{ marginTop: 16 }}>
+              <button className="btn primary" onClick={resetExam}>再考一次</button>
+              <button className="btn" onClick={() => setPage('admin')}>查看管理复盘</button>
+            </div>
           </div>
-        </aside>
+        </div>
       </div>
     );
   };
 
-  /* ── Render: Report ── */
-  const renderReport = () => {
-    if (!report) return <div className="empty">暂无报告</div>;
-    return (
-      <>
-        <div className="grid two">
-          <section className="card">
-            <header>
-              <div>
-                <h2>个人考核报告</h2>
-                <p className="muted">{esc(report.candidate.name)} · {esc(report.candidate.department || "未填写部门")} · {new Date(report.createdAt).toLocaleString("zh-CN")}</p>
-              </div>
-              <div className="btns">
-                <button className="btn ghost" onClick={() => download(`${report.candidate.name}-AI销售模拟考官报告.md`, reportMd(report), "text/markdown;charset=utf-8")}>导出Markdown</button>
-                <button className="btn" onClick={restart}>再考一次</button>
-              </div>
-            </header>
-            <div className="body">
-              <div className="result-head">
-                <div className="grade"><strong>{report.grade}</strong><span>{report.total} 分</span></div>
-                <div>
-                  <h2>{esc(report.conclusion)}</h2>
-                  <p className="muted">{report.source === "ai" ? "AI 大模型评分" : "当前为本地规则兜底评分；正式部署后可接AI大模型评分。"}</p>
-                  <div className="tags">
-                    <span className={`pill ${report.source !== "ai" ? "warn" : ""}`}>{report.source === "ai" ? "AI 评分" : "本地规则兜底"}</span>
-                    {report.flags.map((f, i) => <span key={i} className={`pill ${f.type === "risk" ? "risk" : ""}`}>{f.type === "risk" ? "风险" : "正常"}</span>)}
-                  </div>
-                </div>
-              </div>
-              <h3>维度得分</h3>
-              {report.dimensions.map(d => (
-                <div key={d.key} className="bar">
-                  <div><span>{d.name}</span><b>{d.score}/{d.max}</b></div>
-                  <div className="track"><div className="fill" style={{ width: `${Math.round(d.score / d.max * 100)}%` }} /></div>
-                </div>
-              ))}
-            </div>
-          </section>
-          <aside className="card">
-            <header><div><h2>反馈摘要</h2><p className="muted">用于主管复盘和二次演练。</p></div></header>
-            <div className="body">
-              <h3>优势</h3>
-              <ul className="list">{report.strengths.map((x, i) => <li key={i}>{esc(x)}</li>)}</ul>
-              <h3>补强</h3>
-              <ul className="list">{report.weaknesses.map((x, i) => <li key={i}>{esc(x)}</li>)}</ul>
-            </div>
-          </aside>
-        </div>
-        <section className="card" style={{ marginTop: 18 }}>
-          <header><div><h2>评分证据</h2><p className="muted">每项评价保留逐字稿依据。</p></div></header>
-          <div className="body">
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>评分项</th><th>得分</th><th>评价</th><th>证据</th></tr></thead>
-                <tbody>{report.dimensions.map(d => (
-                  <tr key={d.key}><td>{d.name}</td><td>{d.score}/{d.max}</td><td>{esc(d.comment)}</td><td>{esc(d.evidence)}</td></tr>
-                ))}</tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      </>
-    );
+  const renderExamPage = () => {
+    if (stage === 'entry') return renderEntry();
+    if (stage === 'answer') return renderAnswer();
+    if (stage === 'report') return renderReport();
+    return null;
   };
 
-  /* ── Render: Admin ── */
-  const renderAdmin = () => {
-    const list = adminReports;
-    const avg = list.length ? Math.round(list.reduce((n, r) => n + r.total, 0) / list.length) : 0;
-    return (
-      <>
-        <div className="cards">
-          <div className="metric"><span>已完成</span><strong>{list.length}</strong></div>
-          <div className="metric"><span>平均分</span><strong>{avg}</strong></div>
-          <div className="metric"><span>待复核</span><strong>{list.filter(r => r.flags?.some(f => f.type === "risk")).length}</strong></div>
-          <div className="metric"><span>题库量</span><strong>{QUESTIONS.length}</strong></div>
-        </div>
-        <section className="card">
-          <header>
-            <div><h2>成绩与报告</h2><p className="muted">数据保存在数据库中，支持跨设备查看。</p></div>
-            <div className="btns">
-              <button className="btn" onClick={exportCsv}>导出CSV</button>
-              <button className="btn" onClick={() => { if (confirm("确定刷新数据吗？")) window.location.reload(); }}>刷新</button>
-            </div>
-          </header>
-          <div className="body">
-            {list.length ? (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>姓名</th><th>部门</th><th>分数</th><th>等级</th><th>题目</th><th>来源</th></tr></thead>
-                  <tbody>{list.map(r => (
-                    <tr key={r.id}>
-                      <td>{esc(r.candidate.name)}</td>
-                      <td>{esc(r.candidate.department || "")}</td>
-                      <td>{r.total}</td>
-                      <td>{r.grade}</td>
-                      <td>{r.questions.map(q => q.id).join("、")}</td>
-                      <td>{r.source === "ai" ? "AI 评分" : "本地规则兜底"}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <div className="empty">暂无考核结果</div>}
+  const renderAdminPage = () => (
+    <div>
+      <div className="cards">
+        <div className="metric"><span>参考人数</span><strong>{metrics.total}</strong></div>
+        <div className="metric"><span>通过人数</span><strong>{metrics.passCount}</strong></div>
+        <div className="metric"><span>平均分</span><strong>{metrics.avgScore}</strong></div>
+        <div className="metric"><span>风险标记</span><strong>{metrics.riskCount}</strong></div>
+      </div>
+      <div className="card">
+        <header>
+          <div>
+            <div className="pill">管理复盘</div>
+            <h2 style={{ marginTop: 8 }}>考核报告列表</h2>
           </div>
-        </section>
-      </>
-    );
-  };
+          <input placeholder="搜索姓名/部门/考试码" value={adminFilter} onChange={e => setAdminFilter(e.target.value)} style={{ width: 200 }} />
+        </header>
+        <div className="body">
+          {filteredReports.length === 0 ? (
+            <div className="empty">暂无报告数据</div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>姓名</th>
+                    <th>部门</th>
+                    <th>考试码</th>
+                    <th>总分</th>
+                    <th>等级</th>
+                    <th>风险</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReports.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.candidate.name}</td>
+                      <td>{r.candidate.department}</td>
+                      <td>{r.candidate.code}</td>
+                      <td>{r.total}</td>
+                      <td><span className="pill" style={{ background: gradeColor(r.grade), color: '#fff' }}>{r.grade}</span></td>
+                      <td>{r.flags.length > 0 ? r.flags.map((f, j) => <span key={j} className={pillClassForFlag(f)}>{f.text}</span>) : '-'}</td>
+                      <td>{formatTime(r.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -457,22 +502,23 @@ export default function ExamPage() {
           <h1>AI销售模拟考官</h1>
         </div>
         <nav>
-          <button className={`tab ${page === "exam" ? "active" : ""}`} onClick={() => setPage("exam")}>销售考试</button>
-          <button className={`tab ${page === "admin" ? "active" : ""}`} onClick={() => setPage("admin")}>管理复盘</button>
+          <button className={`tab ${page === 'exam' ? 'active' : ''}`} onClick={() => setPage('exam')}>销售考试</button>
+          <button className={`tab ${page === 'admin' ? 'active' : ''}`} onClick={() => setPage('admin')}>管理复盘</button>
         </nav>
       </header>
       <main>
-        <section hidden={page !== "exam"}>
-          {stage === "entry" && renderEntry()}
-          {stage === "answer" && renderAnswer()}
-          {stage === "report" && renderReport()}
-        </section>
-        <section hidden={page !== "admin"}>
-          {renderAdmin()}
-        </section>
+        {page === 'exam' ? renderExamPage() : renderAdminPage()}
       </main>
-      {toast && <Toast text={toast} onDone={() => setToast("")} />}
-      {loading && <LoadingOverlay text={loading} />}
+      {toast && <div className="toast">{toast}</div>}
+      {loading.show && (
+        <div className="loading-overlay">
+          <div className="loading-card">
+            <div className="spinner" />
+            <h3 style={{ margin: '0 0 6px' }}>{loading.title}</h3>
+            {loading.desc && <p className="muted" style={{ fontSize: 13, margin: 0 }}>{loading.desc}</p>}
+          </div>
+        </div>
+      )}
     </>
   );
 }
