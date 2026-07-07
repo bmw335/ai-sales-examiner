@@ -12,6 +12,12 @@
 
 ```
 ├── public/                 # 静态资源
+├── backend-config/         # AI 评分知识库（静态配置文件）
+│   ├── scoring-rubric.json # 评分标准（维度、权重、等级规则）
+│   ├── product-knowledge.md # 产品知识包
+│   ├── ai-prompts.md       # AI 评分 Prompt 模板
+│   ├── question-bank.json  # 题库配置
+│   └── app-config.json     # 应用配置
 ├── scripts/                # 构建与启动脚本
 │   ├── build.sh            # 构建脚本
 │   ├── dev.sh              # 开发环境启动脚本
@@ -19,10 +25,22 @@
 │   └── start.sh            # 生产环境启动脚本
 ├── src/
 │   ├── app/                # 页面路由与布局
+│   │   ├── api/
+│   │   │   ├── transcribe/ # POST 语音转文字（ASR）
+│   │   │   ├── score/      # POST AI 评分（LLM）
+│   │   │   └── reports/    # GET/POST 报告存储（Supabase）
+│   │   ├── page.tsx        # 主页面（考试 + 管理复盘）
+│   │   ├── layout.tsx      # 根布局
+│   │   └── globals.css     # 全局样式
 │   ├── components/ui/      # Shadcn UI 组件库
 │   ├── hooks/              # 自定义 Hooks
 │   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
+│   │   ├── utils.ts        # 通用工具函数 (cn)
+│   │   ├── exam-data.ts    # 题库数据与类型定义
+│   │   └── scoring.ts      # 本地规则兜底评分逻辑
+│   ├── storage/database/   # Supabase 数据库
+│   │   ├── shared/schema.ts # Drizzle 表定义
+│   │   └── server/supabase-client.ts # 服务端客户端
 │   └── server.ts           # 自定义服务端入口
 ├── next.config.ts          # Next.js 配置
 ├── package.json            # 项目依赖管理
@@ -63,3 +81,19 @@
 
 - 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
 - Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+
+## API 接口说明
+
+| 接口 | 方法 | 功能 | 依赖 |
+|------|------|------|------|
+| `/api/transcribe` | POST | 语音转文字 | ASR (coze-coding-dev-sdk) |
+| `/api/score` | POST | AI 评分 | LLM (coze-coding-dev-sdk) |
+| `/api/reports` | GET | 查询报告列表 | Supabase |
+| `/api/reports` | POST | 保存报告 | Supabase |
+
+### 关键文件
+
+- `src/lib/exam-data.ts` — 题库数据（QUESTIONS）、评分标准（RUBRIC）、类型定义
+- `src/lib/scoring.ts` — 本地规则兜底评分逻辑（makeLocalReport）
+- `src/app/page.tsx` — 主页面，包含考试流程和管理复盘
+- `backend-config/` — AI 评分知识库（评分标准、产品知识、Prompt 模板）
