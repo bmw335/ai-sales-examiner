@@ -387,20 +387,20 @@ export default function ExamPage() {
               </div>
             </div>
             <h3>维度得分</h3>
-            {report.dimensions.map(dim => (
-              <div key={dim.key} className="bar">
+            {(report.dimensions || []).filter(d => d && d.name).map(dim => (
+              <div key={dim.key || dim.name} className="bar">
                 <div><span>{dim.name}</span><span>{dim.score} / {dim.max}</span></div>
-                <div className="track"><div className="fill" style={{ width: `${(dim.score / dim.max) * 100}%` }} /></div>
+                <div className="track"><div className="fill" style={{ width: `${dim.max > 0 ? (dim.score / dim.max) * 100 : 0}%` }} /></div>
               </div>
             ))}
             <h3>优势项</h3>
-            <ul className="list">{report.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            <ul className="list">{(report.strengths || []).map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
             <h3>待改进</h3>
-            <ul className="list">{report.weaknesses.map((w, i) => <li key={i}>{w}</li>)}</ul>
-            {report.flags.length > 0 && (
+            <ul className="list">{(report.weaknesses || []).map((w: string, i: number) => <li key={i}>{w}</li>)}</ul>
+            {(report.flags || []).length > 0 && (
               <>
                 <h3>风险标记</h3>
-                <div className="tags">{report.flags.map((f, i) => <span key={i} className={pillClassForFlag(f)}>{f.text}</span>)}</div>
+                <div className="tags">{(report.flags || []).map((f: Flag, i: number) => <span key={i} className={pillClassForFlag(f)}>{f.text}</span>)}</div>
               </>
             )}
           </div>

@@ -147,6 +147,26 @@ export async function POST(request: NextRequest) {
       if (reportData.report) {
         reportData = reportData.report;
       }
+
+      // Normalize the report to ensure all required fields exist
+      reportData = {
+        total: reportData.total ?? 0,
+        grade: reportData.grade ?? "E",
+        conclusion: reportData.conclusion ?? "",
+        dimensions: Array.isArray(reportData.dimensions)
+          ? reportData.dimensions.filter((d: Record<string, unknown>) => d && typeof d === "object" && d.name).map((d: Record<string, unknown>) => ({
+              key: d.key || d.name,
+              name: d.name,
+              max: d.max ?? 20,
+              score: d.score ?? 0,
+              comment: d.comment ?? "",
+              evidence: d.evidence ?? "",
+            }))
+          : [],
+        strengths: Array.isArray(reportData.strengths) ? reportData.strengths : [],
+        weaknesses: Array.isArray(reportData.weaknesses) ? reportData.weaknesses : [],
+        flags: Array.isArray(reportData.flags) ? reportData.flags.filter((f: Record<string, unknown>) => f && f.text) : [],
+      };
     } catch (parseErr) {
       console.error("[score] Failed to parse LLM response:", parseErr);
       return NextResponse.json({
