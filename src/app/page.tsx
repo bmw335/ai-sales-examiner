@@ -81,6 +81,9 @@ export default function ExamPage() {
   }, [reports]);
 
   useEffect(() => {
+    console.log("内置库URL：", process.env.COZE_SUPABASE_URL);
+    console.log("anon密钥：", process.env.COZE_SUPABASE_ANON_KEY);
+    console.log("service密钥：", process.env.COZE_SUPABASE_SERVICE_KEY);
     setReports(loadReports());
   }, []);
 
