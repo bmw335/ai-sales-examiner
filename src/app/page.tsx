@@ -66,9 +66,6 @@ export default function ExamPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [adminFilter, setAdminFilter] = useState<string>('');
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
   // 随机抽取的题目（A/B/C 各 1 题）
   const [drawnQuestions, setDrawnQuestions] = useState<Question[]>([]);
 
@@ -155,100 +152,129 @@ export default function ExamPage() {
   };
 
 
-  const chunkIndexRef = useRef(0);
+  // 实时转写相关 refs
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const startRecording = async () => {
     if (recording) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // 优先使用 OGG OPUS 格式（ASR 原生支持，无需后端转码）
-      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-        ? 'audio/ogg;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : '';
-      const options = mimeType ? { mimeType } : undefined;
-      const mr = new MediaRecorder(stream, options);
-      const actualMime = mr.mimeType || mimeType || 'audio/webm';
-      chunksRef.current = [];
-      chunkIndexRef.current = 0;
+      // 获取麦克风权限
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
+        } 
+      });
+      streamRef.current = stream;
 
-      // 分片队列，用于顺序处理转写
-      const chunkQueue: { blob: Blob; idx: number }[] = [];
-      let isProcessing = false;
+      // 建立 WebSocket 连接
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/asr`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-      const processNextChunk = async () => {
-        if (isProcessing || chunkQueue.length === 0) return;
-        isProcessing = true;
-        const { blob, idx } = chunkQueue.shift()!;
+      ws.onopen = () => {
+        console.log('[ASR] WebSocket 已连接');
+      };
+
+      ws.onmessage = (event) => {
         try {
-          const formData = new FormData();
-          const ext = actualMime.includes('ogg') ? 'ogg' : 'webm';
-          formData.append('audio', blob, `chunk_${idx}.${ext}`);
-          formData.append('mimeType', actualMime);
-          const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
-          const data = await res.json();
-          if (data.ok && data.text) {
-            // 追加到当前逐字稿末尾
-            setAnswers(prev => {
-              const existing = prev[currentQuestion.id]?.transcript || '';
-              const newTranscript = existing ? `${existing}\n${data.text}` : data.text;
-              return {
-                ...prev,
-                [currentQuestion.id]: {
-                  ...prev[currentQuestion.id],
-                  questionId: currentQuestion.id,
-                  transcript: newTranscript,
-                  duration: prev[currentQuestion.id]?.duration || 0,
-                  audioCaptured: true,
-                }
-              };
-            });
+          const data = JSON.parse(event.data);
+          if (data.type === 'intermediate' || data.type === 'final') {
+            // 更新逐字稿
+            setAnswers(prev => ({
+              ...prev,
+              [currentQuestion.id]: {
+                ...prev[currentQuestion.id],
+                questionId: currentQuestion.id,
+                transcript: data.text,
+                duration: prev[currentQuestion.id]?.duration || 0,
+                audioCaptured: true,
+              }
+            }));
+          } else if (data.type === 'error') {
+            showToast('转写错误: ' + data.message);
           }
         } catch {
-          // 转写失败静默处理，不影响录音
-        } finally {
-          isProcessing = false;
-          // 继续处理队列中的下一个分片
-          if (chunkQueue.length > 0) {
-            processNextChunk();
-          }
+          // 忽略解析错误
         }
       };
 
-      // 每 3 秒触发一次 ondataavailable，实现分片实时转写
-      mr.ondataavailable = (e: BlobEvent) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-          const chunkIdx = chunkIndexRef.current++;
-          // 将分片加入队列并触发处理
-          chunkQueue.push({ blob: e.data, idx: chunkIdx });
-          processNextChunk();
+      ws.onerror = () => {
+        showToast('实时转写连接失败');
+      };
+
+      ws.onclose = () => {
+        console.log('[ASR] WebSocket 已关闭');
+      };
+
+      // 创建 AudioContext 和音频处理节点
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      
+      // 使用 ScriptProcessorNode 捕获 PCM 数据
+      // 注意：ScriptProcessorNode 已被废弃，但兼容性最好
+      // 生产环境建议使用 AudioWorklet
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        
+        const inputData = e.inputBuffer.getChannelData(0);
+        // 将 Float32 转换为 Int16 PCM
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
+        // 发送 PCM 数据
+        ws.send(pcmData.buffer);
       };
 
-      mr.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-      };
+      source.connect(processor);
+      processor.connect(audioContext.destination);
 
-      // 每 3 秒触发一次 ondataavailable
-      mr.start(3000);
-      mediaRecorderRef.current = mr;
       setRecording(true);
       setRecordingQ(currentQuestion.id);
-    } catch {
+    } catch (err) {
+      console.error('[ASR] 启动录音失败:', err);
       showToast('无法访问麦克风，请检查浏览器权限');
     }
   };
 
   const stopRecording = () => {
-    if (!recording || !mediaRecorderRef.current) return;
-    mediaRecorderRef.current.stop();
+    if (!recording) return;
+
+    // 发送结束信号
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'end' }));
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // 停止音频处理
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+
     setRecording(false);
     setRecordingQ(null);
-    // 保留分片拼接的逐字稿结果
-    // 注：由于 OGG/WebM 音频分片无法简单拼接，不做全量重转写
-    // 分片转写的结果已经足够用于后续评分
   };
 
   const submitAll = async () => {
