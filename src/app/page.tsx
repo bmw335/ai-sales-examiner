@@ -141,7 +141,7 @@ export default function ExamPage() {
     if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
   };
 
-  const transcribeAudio = async (blob: Blob) => {
+  const transcribeAudio = async (blob: Blob, mimeType?: string) => {
     if (!APP_CONFIG.enableBackend) {
       showToast('当前为演示模式，语音转文字未启用');
       return;
@@ -149,7 +149,9 @@ export default function ExamPage() {
     showLoading('正在语音转文字', '已识别到录音，正在生成逐字稿');
     try {
       const formData = new FormData();
-      formData.append('audio', blob, 'recording.wav');
+      // 根据实际录音格式选择文件扩展名
+      const ext = mimeType?.includes('ogg') ? 'ogg' : mimeType?.includes('webm') ? 'webm' : 'wav';
+      formData.append('audio', blob, `recording.${ext}`);
       const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.message || '转写失败');
@@ -166,13 +168,21 @@ export default function ExamPage() {
     if (recording) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      // 优先使用 OGG OPUS 格式（ASR 原生支持，无需后端转码）
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : '';
+      const options = mimeType ? { mimeType } : undefined;
+      const mr = new MediaRecorder(stream, options);
+      const actualMime = mr.mimeType || mimeType || 'audio/webm';
       chunksRef.current = [];
       mr.ondataavailable = (e: BlobEvent) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, { type: actualMime });
         stream.getTracks().forEach(t => t.stop());
-        await transcribeAudio(blob);
+        await transcribeAudio(blob, actualMime);
       };
       mr.start();
       mediaRecorderRef.current = mr;

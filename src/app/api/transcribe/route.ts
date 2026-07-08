@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ASRClient, Config, HeaderUtils } from "coze-coding-dev-sdk";
-import { execSync } from "child_process";
-import fs from "fs";
-import path from "path";
-import os from "os";
 
 export const maxDuration = 60;
 
@@ -19,39 +15,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Save uploaded audio to temp file
-    const tempDir = os.tmpdir();
-    const inputPath = path.join(tempDir, `input-${Date.now()}.webm`);
-    const outputPath = path.join(tempDir, `output-${Date.now()}.wav`);
-
+    // 直接读取音频并转 base64（ASR 支持 WAV/MP3/OGG OPUS/M4A）
+    // 前端已录制为 ASR 原生支持的格式，无需后端转码
     const arrayBuffer = await audioFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    fs.writeFileSync(inputPath, buffer);
-
-    // Convert webm/opus to wav using ffmpeg (ASR supports WAV)
-    try {
-      execSync(
-        `ffmpeg -y -i "${inputPath}" -ar 16000 -ac 1 -f wav "${outputPath}" 2>/dev/null`,
-        { timeout: 30000 }
-      );
-    } catch (ffmpegErr) {
-      // Clean up
-      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-      return NextResponse.json(
-        { ok: false, message: "音频格式转换失败" },
-        { status: 500 }
-      );
-    }
-
-    // Clean up input
-    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-
-    // Read converted wav and convert to base64
-    const wavBuffer = fs.readFileSync(outputPath);
-    const base64Data = wavBuffer.toString("base64");
-
-    // Clean up output
-    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    const base64Data = buffer.toString("base64");
 
     // Call ASR
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
