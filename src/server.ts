@@ -95,11 +95,15 @@ function handleASRConnection(clientWs: WebSocket) {
       
       if (data.type === 'audio') {
         // 音频数据（base64 编码的 MP3）
+        console.log('[ASR] 收到音频数据, isConnected:', isConnected, 'audio length:', data.audio?.length || 0);
         if (isConnected && data.audio) {
           client.sendAudio(data.audio);
+        } else if (!isConnected) {
+          console.log('[ASR] 讯飞未连接，丢弃音频数据');
         }
       } else if (data.type === 'end') {
         // 结束信号
+        console.log('[ASR] 收到结束信号, isConnected:', isConnected);
         if (isConnected) {
           client.end();
         }

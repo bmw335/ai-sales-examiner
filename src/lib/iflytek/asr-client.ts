@@ -181,7 +181,7 @@ export class IflytekASRClient {
           data: {
             status: 0,  // 0 = 第一帧
             format: 'audio/L16;rate=16000',
-            encoding: 'raw',
+            encoding: 'lame',  // MP3 格式
             audio: audioBase64
           }
         };

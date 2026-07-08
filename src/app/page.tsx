@@ -247,7 +247,7 @@ export default function ExamPage() {
           
           ws.send(JSON.stringify({
             type: 'audio',
-            data: base64,
+            audio: base64,
             status: 1  // 继续发送
           }));
         }
@@ -285,7 +285,7 @@ export default function ExamPage() {
 
     // 发送结束信号
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'audio', status: 2 }));  // 结束信号
+      wsRef.current.send(JSON.stringify({ type: 'end' }));  // 结束信号
       setTimeout(() => {
         if (wsRef.current) {
           wsRef.current.close();
