@@ -26,6 +26,7 @@ export class IflytekASRClient {
   private onError: ((error: Error) => void) | null = null;
   private onClose: (() => void) | null = null;
   private isConnected: boolean = false;
+  private firstFrameSent: boolean = false;
 
   constructor(config: IflytekConfig) {
     this.config = config;
@@ -78,23 +79,9 @@ export class IflytekASRClient {
 
         this.ws.on('open', () => {
           this.isConnected = true;
-          // 发送启动参数 - 讯飞语音听写 API 格式
-          const startParams = {
-            common: {
-              app_id: this.config.appId
-            },
-            business: {
-              language: 'zh_cn',
-              domain: 'iat',
-              accent: 'mandarin',
-              vad_eos: 3000,  // 静音检测，3秒无语音自动结束
-              dwa: 'wpgs',    // 开启动态修正
-              ptt: 1,         // 开启标点
-              encoding: 'lame', // MP3 编码
-              frame_size: 1280  // 每帧大小
-            }
-          };
-          this.ws!.send(JSON.stringify(startParams));
+          // 讯飞实时转写 API 第一帧格式
+          // 第一帧必须包含 common, business, data 三个字段
+          this.firstFrameSent = false;
           resolve();
         });
 
@@ -177,12 +164,38 @@ export class IflytekASRClient {
    */
   sendAudio(audioBase64: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const data = {
-        data: {
-          status: 1,  // 1 = 继续发送
-          audio: audioBase64
-        }
-      };
+      let data: any;
+      
+      if (!this.firstFrameSent) {
+        // 第一帧：包含 common、business 和 data
+        data = {
+          common: {
+            app_id: this.config.appId
+          },
+          business: {
+            language: 'zh_cn',
+            domain: 'iat',
+            accent: 'mandarin',
+            dwa: 'wpgs'
+          },
+          data: {
+            status: 0,  // 0 = 第一帧
+            format: 'audio/L16;rate=16000',
+            encoding: 'raw',
+            audio: audioBase64
+          }
+        };
+        this.firstFrameSent = true;
+      } else {
+        // 后续帧：只包含 data
+        data = {
+          data: {
+            status: 1,  // 1 = 继续发送
+            audio: audioBase64
+          }
+        };
+      }
+      
       this.ws.send(JSON.stringify(data));
     }
   }
