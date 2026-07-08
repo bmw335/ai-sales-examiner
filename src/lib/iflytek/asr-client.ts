@@ -34,22 +34,22 @@ export class IflytekASRClient {
    */
   private generateAuthUrl(): string {
     const { apiKey, apiSecret } = this.config;
-    const host = 'office-api-ast-dx.iflyaisol.com';
+    const host = 'iat-api.xfyun.cn';
     const date = new Date().toUTCString();
-    const signatureOrigin = `host: ${host}\ndate: ${date}\nGET /ast/communicate/v1 HTTP/1.1`;
+    const signatureOrigin = `host: ${host}\ndate: ${date}\nGET /v2/iat HTTP/1.1`;
     
-    // HMAC-SHA1 签名
+    // HMAC-SHA256 签名
     const signature = crypto
-      .createHmac('sha1', apiSecret)
+      .createHmac('sha256', apiSecret)
       .update(signatureOrigin)
       .digest('base64');
     
     // 构建 authorization
-    const authorizationOrigin = `api_key="${apiKey}", algorithm="hmac-sha1", headers="host date request-line", signature="${signature}"`;
+    const authorizationOrigin = `api_key="${apiKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`;
     const authorization = Buffer.from(authorizationOrigin).toString('base64');
     
     // 构建 URL
-    const url = `wss://${host}/ast/communicate/v1?authorization=${authorization}&date=${encodeURIComponent(date)}&host=${host}`;
+    const url = `wss://${host}/v2/iat?authorization=${authorization}&date=${encodeURIComponent(date)}&host=${host}`;
     return url;
   }
 
@@ -73,17 +73,18 @@ export class IflytekASRClient {
         this.ws = new WebSocket(url);
 
         this.ws.on('open', () => {
-          // 发送启动参数
+          // 发送启动参数 - 讯飞语音听写 API 格式
           const startParams = {
             common: {
               app_id: this.config.appId
             },
             business: {
-              audio_encode: 'pcm_s16le',
-              samplerate: 16000,
-              channel: 1,
+              language: 'zh_cn',
+              domain: 'iat',
+              accent: 'mandarin',
               vad_eos: 3000,  // 静音检测，3秒无语音自动结束
-              language: 'zh_cn'
+              dwa: 'wpgs',    // 开启动态修正
+              ptt: 1          // 开启标点
             }
           };
           this.ws!.send(JSON.stringify(startParams));
