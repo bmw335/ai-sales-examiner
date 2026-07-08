@@ -154,7 +154,7 @@ export default function ExamPage() {
     if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
   };
 
-  const transcribingRef = useRef(false);
+
   const chunkIndexRef = useRef(0);
 
   const startRecording = async () => {
@@ -172,48 +172,58 @@ export default function ExamPage() {
       const actualMime = mr.mimeType || mimeType || 'audio/webm';
       chunksRef.current = [];
       chunkIndexRef.current = 0;
-      transcribingRef.current = false;
+
+      // 分片队列，用于顺序处理转写
+      const chunkQueue: { blob: Blob; idx: number }[] = [];
+      let isProcessing = false;
+
+      const processNextChunk = async () => {
+        if (isProcessing || chunkQueue.length === 0) return;
+        isProcessing = true;
+        const { blob, idx } = chunkQueue.shift()!;
+        try {
+          const formData = new FormData();
+          const ext = actualMime.includes('ogg') ? 'ogg' : 'webm';
+          formData.append('audio', blob, `chunk_${idx}.${ext}`);
+          formData.append('mimeType', actualMime);
+          const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
+          const data = await res.json();
+          if (data.ok && data.text) {
+            // 追加到当前逐字稿末尾
+            setAnswers(prev => {
+              const existing = prev[currentQuestion.id]?.transcript || '';
+              const newTranscript = existing ? `${existing}\n${data.text}` : data.text;
+              return {
+                ...prev,
+                [currentQuestion.id]: {
+                  ...prev[currentQuestion.id],
+                  questionId: currentQuestion.id,
+                  transcript: newTranscript,
+                  duration: prev[currentQuestion.id]?.duration || 0,
+                  audioCaptured: true,
+                }
+              };
+            });
+          }
+        } catch {
+          // 转写失败静默处理，不影响录音
+        } finally {
+          isProcessing = false;
+          // 继续处理队列中的下一个分片
+          if (chunkQueue.length > 0) {
+            processNextChunk();
+          }
+        }
+      };
 
       // 每 3 秒触发一次 ondataavailable，实现分片实时转写
-      mr.ondataavailable = async (e: BlobEvent) => {
+      mr.ondataavailable = (e: BlobEvent) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
-          const chunkBlob = e.data;
           const chunkIdx = chunkIndexRef.current++;
-
-          // 异步转写当前分片，不阻塞录音
-          if (!transcribingRef.current) {
-            transcribingRef.current = true;
-            try {
-              const formData = new FormData();
-              const ext = actualMime.includes('ogg') ? 'ogg' : 'webm';
-              formData.append('audio', chunkBlob, `chunk_${chunkIdx}.${ext}`);
-              formData.append('mimeType', actualMime);
-              const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
-              const data = await res.json();
-              if (data.ok && data.text) {
-                // 追加到当前逐字稿末尾
-                setAnswers(prev => {
-                  const existing = prev[currentQuestion.id]?.transcript || '';
-                  const newTranscript = existing ? `${existing}\n${data.text}` : data.text;
-                  return {
-                    ...prev,
-                    [currentQuestion.id]: {
-                      ...prev[currentQuestion.id],
-                      questionId: currentQuestion.id,
-                      transcript: newTranscript,
-                      duration: prev[currentQuestion.id]?.duration || 0,
-                      audioCaptured: true,
-                    }
-                  };
-                });
-              }
-            } catch {
-              // 转写失败静默处理，不影响录音
-            } finally {
-              transcribingRef.current = false;
-            }
-          }
+          // 将分片加入队列并触发处理
+          chunkQueue.push({ blob: e.data, idx: chunkIdx });
+          processNextChunk();
         }
       };
 
