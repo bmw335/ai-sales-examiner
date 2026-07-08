@@ -154,28 +154,8 @@ export default function ExamPage() {
     if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
   };
 
-  const transcribeAudio = async (blob: Blob, mimeType?: string) => {
-    if (!APP_CONFIG.enableBackend) {
-      showToast('当前为演示模式，语音转文字未启用');
-      return;
-    }
-    showLoading('正在语音转文字', '已识别到录音，正在生成逐字稿');
-    try {
-      const formData = new FormData();
-      // 根据实际录音格式选择文件扩展名
-      const ext = mimeType?.includes('ogg') ? 'ogg' : mimeType?.includes('webm') ? 'webm' : 'wav';
-      formData.append('audio', blob, `recording.${ext}`);
-      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.message || '转写失败');
-      saveAnswer(data.text, Math.round(data.duration || 0));
-      showToast('语音转文字完成');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '语音转文字失败');
-    } finally {
-      hideLoading();
-    }
-  };
+  const transcribingRef = useRef(false);
+  const chunkIndexRef = useRef(0);
 
   const startRecording = async () => {
     if (recording) return;
@@ -191,13 +171,58 @@ export default function ExamPage() {
       const mr = new MediaRecorder(stream, options);
       const actualMime = mr.mimeType || mimeType || 'audio/webm';
       chunksRef.current = [];
-      mr.ondataavailable = (e: BlobEvent) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: actualMime });
-        stream.getTracks().forEach(t => t.stop());
-        await transcribeAudio(blob, actualMime);
+      chunkIndexRef.current = 0;
+      transcribingRef.current = false;
+
+      // 每 3 秒触发一次 ondataavailable，实现分片实时转写
+      mr.ondataavailable = async (e: BlobEvent) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+          const chunkBlob = e.data;
+          const chunkIdx = chunkIndexRef.current++;
+
+          // 异步转写当前分片，不阻塞录音
+          if (!transcribingRef.current) {
+            transcribingRef.current = true;
+            try {
+              const formData = new FormData();
+              const ext = actualMime.includes('ogg') ? 'ogg' : 'webm';
+              formData.append('audio', chunkBlob, `chunk_${chunkIdx}.${ext}`);
+              formData.append('mimeType', actualMime);
+              const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
+              const data = await res.json();
+              if (data.ok && data.text) {
+                // 追加到当前逐字稿末尾
+                setAnswers(prev => {
+                  const existing = prev[currentQuestion.id]?.transcript || '';
+                  const newTranscript = existing ? `${existing}\n${data.text}` : data.text;
+                  return {
+                    ...prev,
+                    [currentQuestion.id]: {
+                      ...prev[currentQuestion.id],
+                      questionId: currentQuestion.id,
+                      transcript: newTranscript,
+                      duration: prev[currentQuestion.id]?.duration || 0,
+                      audioCaptured: true,
+                    }
+                  };
+                });
+              }
+            } catch {
+              // 转写失败静默处理，不影响录音
+            } finally {
+              transcribingRef.current = false;
+            }
+          }
+        }
       };
-      mr.start();
+
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      // 每 3 秒触发一次 ondataavailable
+      mr.start(3000);
       mediaRecorderRef.current = mr;
       setRecording(true);
       setRecordingQ(currentQuestion.id);
