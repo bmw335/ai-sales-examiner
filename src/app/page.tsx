@@ -236,6 +236,9 @@ export default function ExamPage() {
     mediaRecorderRef.current.stop();
     setRecording(false);
     setRecordingQ(null);
+    // 保留分片拼接的逐字稿结果
+    // 注：由于 OGG/WebM 音频分片无法简单拼接，不做全量重转写
+    // 分片转写的结果已经足够用于后续评分
   };
 
   const submitAll = async () => {
