@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { QUESTIONS, type Answer, type Candidate, type Question, type Report, type Flag } from '@/lib/exam-data';
+import { applyIatMessage, downsampleTo16k, pcm16ToBase64, type IatTextState } from '@/lib/iflytek-realtime';
 import { makeLocalReport } from '@/lib/scoring';
 
 type PageKey = 'exam' | 'admin';
@@ -66,8 +67,13 @@ export default function ExamPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [adminFilter, setAdminFilter] = useState<string>('');
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const iatWSRef = useRef<WebSocket | null>(null);
+  const iatTextRef = useRef<IatTextState>({ committed: '', pending: '' });
+  const recordingStartedAtRef = useRef<number>(0);
 
   // 随机抽取的题目（A/B/C 各 1 题）
   const [drawnQuestions, setDrawnQuestions] = useState<Question[]>([]);
@@ -125,18 +131,16 @@ export default function ExamPage() {
     setDrawnQuestions([]);
   };
 
-  const saveAnswer = (transcript: string, duration?: number) => {
-    const existing = answers[currentQuestion.id]?.transcript || '';
-    const newTranscript = existing ? `${existing}\n${transcript}` : transcript;
-    const answer: Answer = {
-      questionId: currentQuestion.id,
-      transcript: newTranscript,
-      duration: duration || 0,
-      audioCaptured: true,
-    };
-    const updated = { ...answers, [currentQuestion.id]: answer };
-    setAnswers(updated);
-    return updated;
+  const setAnswerTranscript = (questionId: string, transcript: string, duration = 0) => {
+    setAnswers(prev => ({
+      ...prev,
+      [questionId]: {
+        questionId,
+        transcript,
+        duration,
+        audioCaptured: true,
+      },
+    }));
   };
 
   const goNext = () => {
@@ -154,64 +158,134 @@ export default function ExamPage() {
     if (currentIdx > 0) setCurrentIdx(currentIdx - 1);
   };
 
-  const transcribeAudio = async (blob: Blob, mimeType?: string) => {
-    if (!APP_CONFIG.enableBackend) {
-      showToast('当前为演示模式，语音转文字未启用');
-      return;
-    }
-    showLoading('正在语音转文字', '已识别到录音，正在生成逐字稿');
-    try {
-      const formData = new FormData();
-      // 根据实际录音格式选择文件扩展名
-      const ext = mimeType?.includes('ogg') ? 'ogg' : mimeType?.includes('webm') ? 'webm' : 'wav';
-      formData.append('audio', blob, `recording.${ext}`);
-      const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.message || '转写失败');
-      saveAnswer(data.text, Math.round(data.duration || 0));
-      showToast('语音转文字完成');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '语音转文字失败');
-    } finally {
-      hideLoading();
-    }
-  };
-
   const startRecording = async () => {
     if (recording) return;
     try {
+      if (!APP_CONFIG.enableBackend) {
+        showToast('当前为演示模式，语音转文字未启用');
+        return;
+      }
+      const questionId = currentQuestion.id;
+      const existingTranscript = answers[questionId]?.transcript || '';
+      const tokenRes = await fetch(`${APP_CONFIG.apiBaseUrl}/api/transcribe/realtime`);
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok || !tokenData.ok || !tokenData.url || !tokenData.appId) {
+        throw new Error(tokenData.message || '讯飞实时转写初始化失败');
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // 优先使用 OGG OPUS 格式（ASR 原生支持，无需后端转码）
-      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-        ? 'audio/ogg;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : '';
-      const options = mimeType ? { mimeType } : undefined;
-      const mr = new MediaRecorder(stream, options);
-      const actualMime = mr.mimeType || mimeType || 'audio/webm';
-      chunksRef.current = [];
-      mr.ondataavailable = (e: BlobEvent) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: actualMime });
-        stream.getTracks().forEach(t => t.stop());
-        await transcribeAudio(blob, actualMime);
+      const AudioContextCtor = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('当前浏览器不支持实时录音');
+      const audioContext = new AudioContextCtor();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const mutedOutput = audioContext.createGain();
+      const ws = new WebSocket(tokenData.url);
+      mutedOutput.gain.value = 0;
+
+      iatTextRef.current = { committed: existingTranscript, pending: '' };
+      recordingStartedAtRef.current = Date.now();
+      streamRef.current = stream;
+      audioContextRef.current = audioContext;
+      audioSourceRef.current = source;
+      audioProcessorRef.current = processor;
+      iatWSRef.current = ws;
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          common: { app_id: tokenData.appId },
+          business: {
+            language: 'zh_cn',
+            domain: 'iat',
+            accent: 'mandarin',
+            vad_eos: 60000,
+            dwa: 'wpgs',
+          },
+          data: {
+            status: 0,
+            format: 'audio/L16;rate=16000',
+            encoding: 'raw',
+          },
+        }));
       };
-      mr.start();
-      mediaRecorderRef.current = mr;
+
+      ws.onmessage = event => {
+        try {
+          const nextText = applyIatMessage(iatTextRef.current, event.data);
+          iatTextRef.current = nextText;
+          setAnswerTranscript(questionId, nextText.text, Math.round((Date.now() - recordingStartedAtRef.current) / 1000));
+          if (nextText.done) ws.close();
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : '讯飞实时转写失败');
+          stopRecording();
+        }
+      };
+
+      ws.onerror = () => {
+        showToast('讯飞实时转写连接异常');
+        stopRecording();
+      };
+
+      processor.onaudioprocess = event => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const pcm = downsampleTo16k(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
+        ws.send(JSON.stringify({
+          data: {
+            status: 1,
+            format: 'audio/L16;rate=16000',
+            encoding: 'raw',
+            audio: pcm16ToBase64(pcm),
+          },
+        }));
+      };
+      source.connect(processor);
+      processor.connect(mutedOutput);
+      mutedOutput.connect(audioContext.destination);
+
       setRecording(true);
-      setRecordingQ(currentQuestion.id);
-    } catch {
-      showToast('无法访问麦克风，请检查浏览器权限');
+      setRecordingQ(questionId);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '无法访问麦克风，请检查浏览器权限');
+      cleanupRecording();
     }
   };
 
+  const cleanupRecording = () => {
+    audioProcessorRef.current?.disconnect();
+    audioSourceRef.current?.disconnect();
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    void audioContextRef.current?.close();
+    audioProcessorRef.current = null;
+    audioSourceRef.current = null;
+    streamRef.current = null;
+    audioContextRef.current = null;
+  };
+
   const stopRecording = () => {
-    if (!recording || !mediaRecorderRef.current) return;
-    mediaRecorderRef.current.stop();
+    if (!recording) return;
+    const ws = iatWSRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        data: {
+          status: 2,
+          format: 'audio/L16;rate=16000',
+          encoding: 'raw',
+          audio: '',
+        },
+      }));
+    } else {
+      ws?.close();
+    }
+    iatWSRef.current = null;
+    cleanupRecording();
     setRecording(false);
     setRecordingQ(null);
   };
+
+  useEffect(() => () => {
+    iatWSRef.current?.close();
+    cleanupRecording();
+  }, []);
 
   const submitAll = async () => {
     const answeredCount = Object.keys(answers).length;
