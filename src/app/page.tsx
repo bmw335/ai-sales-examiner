@@ -409,9 +409,18 @@ export default function ExamPage() {
           <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>{currentQuestion.type}</div>
         </header>
         <div className="body">
-          <p className="muted" style={{ marginBottom: 12 }}>{currentQuestion.prompt}</p>
-          <div className="tags">
-            {currentQuestion.tags.map(tag => <span key={tag} className="tag">{tag}</span>)}
+          {currentQuestion.customer && (
+            <div className="question" style={{ background: '#f0f4f8', borderLeft: '3px solid #3b82f6', padding: '12px 16px', borderRadius: 6, marginBottom: 12 }}>
+              <strong style={{ color: '#1a365d' }}>客户台词</strong>
+              <p style={{ margin: '6px 0 0', color: '#374a68' }}>{currentQuestion.customer}</p>
+            </div>
+          )}
+          <div className="question" style={{ marginTop: 12 }}>
+            <strong>销售任务</strong>
+            <p className="muted" style={{ marginBottom: 12 }}>{currentQuestion.prompt}</p>
+            <div className="tags">
+              {currentQuestion.tags.map(tag => <span key={tag} className="tag">{tag}</span>)}
+            </div>
           </div>
           <label style={{ marginTop: 18 }}>
             <span>逐字稿</span>
