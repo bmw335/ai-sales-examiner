@@ -69,8 +69,11 @@ export default function ExamPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  const currentQuestion = QUESTIONS[currentIdx];
-  const totalQuestions = QUESTIONS.length;
+  // 随机抽取的题目（A/B/C 各 1 题）
+  const [drawnQuestions, setDrawnQuestions] = useState<Question[]>([]);
+
+  const currentQuestion = drawnQuestions[currentIdx];
+  const totalQuestions = drawnQuestions.length;
 
   const metrics = useMemo(() => {
     const total = reports.length;
@@ -100,6 +103,13 @@ export default function ExamPage() {
       showToast('请先填写姓名和部门');
       return;
     }
+    // A/B/C 三类各随机抽 1 题
+    const pick = (type: string) => {
+      const pool = QUESTIONS.filter(q => q.type === type);
+      return pool[Math.floor(Math.random() * pool.length)];
+    };
+    const drawn = ['A', 'B', 'C'].map(pick);
+    setDrawnQuestions(drawn);
     setStage('answer');
     setCurrentIdx(0);
     setAnswers({});
@@ -112,6 +122,7 @@ export default function ExamPage() {
     setAnswers({});
     setCurrentIdx(0);
     setReport(null);
+    setDrawnQuestions([]);
   };
 
   const saveAnswer = (transcript: string, duration?: number) => {
@@ -213,13 +224,13 @@ export default function ExamPage() {
         const res = await fetch(`${APP_CONFIG.apiBaseUrl}/api/score`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidate, questions: QUESTIONS, answers }),
+          body: JSON.stringify({ candidate, questions: drawnQuestions, answers }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.message || '评分失败');
         result = { ...data.report, candidate };
       } else {
-        result = makeLocalReport(candidate, QUESTIONS, Object.values(answers));
+        result = makeLocalReport(candidate, drawnQuestions, Object.values(answers));
       }
       const savedReport: Report = { ...result, createdAt: new Date().toISOString() };
       setReport(savedReport);
@@ -236,7 +247,7 @@ export default function ExamPage() {
               candidate_name: candidate.name,
               candidate_department: candidate.department,
               exam_code: candidate.code,
-              questions: QUESTIONS,
+              questions: drawnQuestions,
               answers,
               report: savedReport,
               source: result.source || 'ai',
@@ -295,16 +306,16 @@ export default function ExamPage() {
       <div className="card">
         <header>
           <div>
-            <div className="pill">考试说明</div>
-            <h2 style={{ marginTop: 8 }}>考前须知</h2>
+            <h2>考核口径</h2>
+            <p className="muted">总分100分，结果进入管理复盘。</p>
           </div>
         </header>
         <div className="body">
           <ul className="list">
-            <li>本次考核共 <strong>{totalQuestions} 题</strong>，覆盖产品认知、客户沟通、方案呈现、风险把控。</li>
-            <li>每题建议作答 <strong>2-4 分钟</strong>，总时长约 40 分钟。</li>
-            <li>可使用麦克风录音，系统会自动转成逐字稿；也可以直接粘贴准备好的话术。</li>
-            <li>提交后，AI 会按评分标准生成结构化报告，主管可在管理复盘页查看。</li>
+            <li><b>先问诊：</b>追问角色、流程、已有做法、痛点和期望结果。</li>
+            <li><b>再匹配：</b>连接产品、服务、培训和共创。</li>
+            <li><b>守边界：</b>现有能力、规划方向和可共创内容必须说清楚。</li>
+            <li><b>能反馈：</b>把客户表达整理成产品需求卡。</li>
           </ul>
         </div>
       </div>
@@ -352,22 +363,29 @@ export default function ExamPage() {
       <div className="card">
         <header>
           <div>
-            <div className="pill">答题进度</div>
-            <h2 style={{ marginTop: 8 }}>已完成 {Object.keys(answers).length} / {totalQuestions}</h2>
+            <h2>评分提醒</h2>
+            <p className="muted">答题时尽量覆盖这些要点。</p>
           </div>
         </header>
         <div className="body">
-          <div className="track" style={{ marginBottom: 16 }}>
-            <div className="fill" style={{ width: `${(Object.keys(answers).length / totalQuestions) * 100}%` }} />
-          </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {QUESTIONS.map((q, idx) => (
-              <div key={q.id} className="question" style={{ padding: 12, background: answers[q.id] ? '#f0f9ff' : '#fbfcff' }}>
-                <strong style={{ fontSize: 12 }}>第 {idx + 1} 题 · {q.type === 'A' ? '产品认知' : q.type === 'B' ? '客户沟通' : '方案呈现'}</strong>
-                <p style={{ fontSize: 14, marginTop: 4 }}>{q.title.slice(0, 40)}...</p>
-              </div>
+          <h3>必须追问</h3>
+          <ul className="list">
+            {(currentQuestion.mustAsk || ['这个问题现在由谁负责？', '希望看到什么变化？']).map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+          <h3>产品连接</h3>
+          <div className="tags">
+            {(currentQuestion.links || []).map((link, idx) => (
+              <span key={idx} className="tag">{link}</span>
             ))}
           </div>
+          <h3>常见减分</h3>
+          <ul className="list">
+            {(currentQuestion.risks || []).map((risk, idx) => (
+              <li key={idx}>{risk}</li>
+            ))}
+          </ul>
         </div>
       </div>
     </div>
