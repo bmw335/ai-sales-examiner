@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { QUESTIONS, type Answer, type Candidate, type Question, type Report, type Flag } from '@/lib/exam-data';
 import { makeLocalReport } from '@/lib/scoring';
+import Recorder from 'recorder-core';
+import 'recorder-core/src/engine/mp3';
+import 'recorder-core/src/engine/mp3-engine';
 
 type PageKey = 'exam' | 'admin';
 type ExamStage = 'entry' | 'answer' | 'report';
@@ -154,24 +157,11 @@ export default function ExamPage() {
 
   // 实时转写相关 refs
   const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<any>(null);
 
   const startRecording = async () => {
     if (recording) return;
     try {
-      // 获取麦克风权限
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true
-        } 
-      });
-      streamRef.current = stream;
-
       // 建立 WebSocket 连接
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/ws/asr`;
@@ -213,34 +203,65 @@ export default function ExamPage() {
         console.log('[ASR] WebSocket 已关闭');
       };
 
-      // 创建 AudioContext 和音频处理节点
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      
-      // 使用 ScriptProcessorNode 捕获 PCM 数据
-      // 注意：ScriptProcessorNode 已被废弃，但兼容性最好
-      // 生产环境建议使用 AudioWorklet
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
+      // 等待 WebSocket 连接建立
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('WebSocket 连接超时')), 5000);
+        ws.addEventListener('open', () => {
+          clearTimeout(timeout);
+          resolve();
+        }, { once: true });
+        ws.addEventListener('error', () => {
+          clearTimeout(timeout);
+          reject(new Error('WebSocket 连接失败'));
+        }, { once: true });
+      });
 
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        
-        const inputData = e.inputBuffer.getChannelData(0);
-        // 将 Float32 转换为 Int16 PCM
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      // 创建 recorder-core 实例，使用 MP3 编码
+      const rec = Recorder({
+        type: 'mp3',
+        sampleRate: 16000,
+        bitRate: 16,
+        onProcess: (buffers: any[], powerLevel: number, bufferDuration: number, bufferSampleRate: number) => {
+          // 当缓冲区有数据时发送到 WebSocket
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (buffers.length === 0 || !buffers[0]) return;
+          
+          // 获取最新的音频数据
+          const buffer = buffers[buffers.length - 1];
+          if (!buffer || buffer.length === 0) return;
+          
+          // 将 Float32 转换为 Int16
+          const pcm = new Int16Array(buffer.length);
+          for (let i = 0; i < buffer.length; i++) {
+            const s = Math.max(-1, Math.min(1, buffer[i]));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          
+          // 转换为 base64 并发送
+          const bytes = new Uint8Array(pcm.buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+          
+          ws.send(JSON.stringify({
+            type: 'audio',
+            data: base64,
+            status: 1  // 继续发送
+          }));
         }
-        // 发送 PCM 数据
-        ws.send(pcmData.buffer);
-      };
+      });
 
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+      // 开始录音
+      rec.start(() => {
+        console.log('[ASR] 录音已开始');
+      }, (err: Error) => {
+        console.error('[ASR] 录音启动失败:', err);
+        showToast('录音启动失败: ' + err.message);
+      });
 
+      recorderRef.current = rec;
       setRecording(true);
       setRecordingQ(currentQuestion.id);
     } catch (err) {
@@ -252,25 +273,25 @@ export default function ExamPage() {
   const stopRecording = () => {
     if (!recording) return;
 
-    // 发送结束信号
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'end' }));
-      wsRef.current.close();
-      wsRef.current = null;
+    // 停止录音
+    if (recorderRef.current) {
+      recorderRef.current.stop((blob: Blob, duration: number) => {
+        console.log('[ASR] 录音已停止, 时长:', duration);
+      }, (err: Error) => {
+        console.error('[ASR] 停止录音失败:', err);
+      });
+      recorderRef.current = null;
     }
 
-    // 停止音频处理
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
+    // 发送结束信号
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'audio', status: 2 }));  // 结束信号
+      setTimeout(() => {
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
+        }
+      }, 500);  // 等待一小段时间让最后的音频数据发送完成
     }
 
     setRecording(false);

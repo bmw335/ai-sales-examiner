@@ -1,5 +1,6 @@
 /**
  * 科大讯飞实时语音转写 WebSocket 客户端
+ * 参考 iFlytek 官方文档和 working implementation
  */
 import WebSocket from 'ws';
 import crypto from 'crypto';
@@ -24,6 +25,7 @@ export class IflytekASRClient {
   private onResult: ((result: IflytekASRResult) => void) | null = null;
   private onError: ((error: Error) => void) | null = null;
   private onClose: (() => void) | null = null;
+  private isConnected: boolean = false;
 
   constructor(config: IflytekConfig) {
     this.config = config;
@@ -31,6 +33,7 @@ export class IflytekASRClient {
 
   /**
    * 生成讯飞鉴权 URL
+   * 使用 hmac-sha256 算法
    */
   private generateAuthUrl(): string {
     const { apiKey, apiSecret } = this.config;
@@ -66,6 +69,7 @@ export class IflytekASRClient {
     this.onClose = onClose;
     this.resultBuffer = '';
     this.sessionId = crypto.randomUUID();
+    this.isConnected = false;
 
     return new Promise((resolve, reject) => {
       try {
@@ -73,6 +77,7 @@ export class IflytekASRClient {
         this.ws = new WebSocket(url);
 
         this.ws.on('open', () => {
+          this.isConnected = true;
           // 发送启动参数 - 讯飞语音听写 API 格式
           const startParams = {
             common: {
@@ -84,7 +89,9 @@ export class IflytekASRClient {
               accent: 'mandarin',
               vad_eos: 3000,  // 静音检测，3秒无语音自动结束
               dwa: 'wpgs',    // 开启动态修正
-              ptt: 1          // 开启标点
+              ptt: 1,         // 开启标点
+              encoding: 'lame', // MP3 编码
+              frame_size: 1280  // 每帧大小
             }
           };
           this.ws!.send(JSON.stringify(startParams));
@@ -101,6 +108,7 @@ export class IflytekASRClient {
         });
 
         this.ws.on('close', () => {
+          this.isConnected = false;
           this.onClose?.();
         });
       } catch (error) {
@@ -165,11 +173,17 @@ export class IflytekASRClient {
   }
 
   /**
-   * 发送音频数据
+   * 发送音频数据（base64 编码的 MP3）
    */
-  sendAudio(data: Buffer): void {
+  sendAudio(audioBase64: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(data);
+      const data = {
+        data: {
+          status: 1,  // 1 = 继续发送
+          audio: audioBase64
+        }
+      };
+      this.ws.send(JSON.stringify(data));
     }
   }
 
@@ -179,8 +193,10 @@ export class IflytekASRClient {
   end(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const endSignal = {
-        end: true,
-        sessionId: this.sessionId
+        data: {
+          status: 2,  // 2 = 结束
+          audio: ''
+        }
       };
       this.ws.send(JSON.stringify(endSignal));
     }
@@ -193,6 +209,7 @@ export class IflytekASRClient {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+      this.isConnected = false;
     }
   }
 }
