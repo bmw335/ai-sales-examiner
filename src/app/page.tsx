@@ -126,9 +126,11 @@ export default function ExamPage() {
   };
 
   const saveAnswer = (transcript: string, duration?: number) => {
+    const existing = answers[currentQuestion.id]?.transcript || '';
+    const newTranscript = existing ? `${existing}\n${transcript}` : transcript;
     const answer: Answer = {
       questionId: currentQuestion.id,
-      transcript,
+      transcript: newTranscript,
       duration: duration || 0,
       audioCaptured: true,
     };
