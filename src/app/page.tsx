@@ -4,8 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { QUESTIONS, type Answer, type Candidate, type Question, type Report, type Flag } from '@/lib/exam-data';
 import { makeLocalReport } from '@/lib/scoring';
 import Recorder from 'recorder-core';
-import 'recorder-core/src/engine/mp3';
-import 'recorder-core/src/engine/mp3-engine';
+import 'recorder-core/src/engine/pcm';
 
 type PageKey = 'exam' | 'admin';
 type ExamStage = 'entry' | 'answer' | 'report';
@@ -216,19 +215,31 @@ export default function ExamPage() {
         }, { once: true });
       });
 
-      // 创建 recorder-core 实例，使用 MP3 编码
+      // 创建 recorder-core 实例，使用 PCM 编码
       const rec = Recorder({
-        type: 'mp3',
+        type: 'pcm',
         sampleRate: 16000,
         bitRate: 16,
         onProcess: (buffers: any[], powerLevel: number, bufferDuration: number, bufferSampleRate: number) => {
+          console.log('[ASR] onProcess called, buffers:', buffers.length, 'duration:', bufferDuration);
           // 当缓冲区有数据时发送到 WebSocket
-          if (ws.readyState !== WebSocket.OPEN) return;
-          if (buffers.length === 0 || !buffers[0]) return;
+          if (ws.readyState !== WebSocket.OPEN) {
+            console.log('[ASR] WebSocket not open, skipping send');
+            return;
+          }
+          if (buffers.length === 0 || !buffers[0]) {
+            console.log('[ASR] No buffers to send');
+            return;
+          }
           
           // 获取最新的音频数据
           const buffer = buffers[buffers.length - 1];
-          if (!buffer || buffer.length === 0) return;
+          if (!buffer || buffer.length === 0) {
+            console.log('[ASR] Last buffer is empty');
+            return;
+          }
+          
+          console.log('[ASR] Sending audio chunk, buffer length:', buffer.length);
           
           // 将 Float32 转换为 Int16
           const pcm = new Int16Array(buffer.length);
