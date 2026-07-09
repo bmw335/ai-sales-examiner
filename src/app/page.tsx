@@ -603,7 +603,7 @@ export default function ExamPage() {
       <header className="topbar">
         <div>
           <p>幼师口袋销售培训</p>
-          <h1>AI销售模拟考官</h1>
+          <h1>AI销售模拟考官<span style={{ fontSize: 14, fontWeight: 400, color: '#657186' }}>（模拟练习版）</span></h1>
         </div>
         <nav>
           <button className={`tab ${page === 'exam' ? 'active' : ''}`} onClick={() => setPage('exam')}>销售考试</button>
