@@ -409,10 +409,10 @@ export default function ExamPage() {
           <div className="pill" style={{ background: '#eef2f7', color: '#3e526f' }}>{currentQuestion.type}</div>
         </header>
         <div className="body">
-          {currentQuestion.customerRole && currentQuestion.customerScript && (
+          {currentQuestion.customer && (
             <div className="question" style={{ background: '#f0f4f8', borderLeft: '3px solid #3b82f6', padding: '12px 16px', borderRadius: 6, marginBottom: 12 }}>
               <strong style={{ color: '#1a365d' }}>客户台词</strong>
-              <p style={{ margin: '6px 0 0', color: '#374a68' }}>{currentQuestion.customerRole}：{currentQuestion.customerScript}</p>
+              <p style={{ margin: '6px 0 0', color: '#374a68' }}>{currentQuestion.customer}</p>
             </div>
           )}
           <div className="question" style={{ marginTop: 12 }}>
@@ -461,13 +461,13 @@ export default function ExamPage() {
           </ul>
           <h3>产品连接</h3>
           <div className="tags">
-            {(currentQuestion.productLinks || []).map((link, idx) => (
+            {(currentQuestion.links || []).map((link, idx) => (
               <span key={idx} className="tag">{link}</span>
             ))}
           </div>
           <h3>常见减分</h3>
           <ul className="list">
-            {(currentQuestion.deductionPoints || []).map((risk, idx) => (
+            {(currentQuestion.risks || []).map((risk, idx) => (
               <li key={idx}>{risk}</li>
             ))}
           </ul>
@@ -586,7 +586,7 @@ export default function ExamPage() {
                       <td>{r.total}</td>
                       <td><span className="pill" style={{ background: gradeColor(r.grade), color: '#fff' }}>{r.grade}</span></td>
                       <td>{(r.flags || []).length > 0 ? (r.flags || []).map((f, j) => <span key={j} className={pillClassForFlag(f)}>{f.text}</span>) : '-'}</td>
-                      <td>{r.createdAt ? formatTime(r.createdAt) : '-'}</td>
+                      <td>{formatTime(r.createdAt)}</td>
                     </tr>
                   ))}
                 </tbody>

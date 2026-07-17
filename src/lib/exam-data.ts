@@ -2,172 +2,133 @@ export interface Question {
   id: string;
   type: 'A' | 'B' | 'C';
   title: string;
-  customerRole?: string;
-  customerScript?: string;
+  customer?: string;
   prompt: string;
-  timeLimit?: number;
   tags: string[];
+  points?: string[];
+  risks?: string[];
+  links?: string[];
   mustAsk?: string[];
-  excellentPoints: string[];
-  deductionPoints: string[];
-  productLinks: string[];
-}
-
-// 组合客户台词用于显示
-function makeCustomer(role?: string, script?: string): string | undefined {
-  if (!role || !script) return undefined;
-  return `${role}：${script}`;
 }
 
 export const QUESTIONS: Question[] = [
   {
     id: "A1", type: "A", title: "PBL项目化学习的核心是什么？",
     prompt: "请用园长听得懂的话说明PBL项目化学习的核心、实施关键要素和老师常见卡点。",
-    timeLimit: 120,
     tags: ["PBL", "项目化学习", "课程建设"],
-    excellentPoints: ["真实问题或情境驱动", "儿童持续探究", "过程证据", "成果表达与反思", "教师需要问题链和记录工具支持"],
-    deductionPoints: ["把PBL说成一次主题活动或成果展", "只讲概念，不讲园所实施卡点"],
-    productLinks: ["未来PBL工具", "园本库", "AI项目资料整理", "教研服务"]
+    points: ["真实问题或情境驱动", "儿童持续探究", "过程证据", "成果表达与反思"],
+    risks: ["把PBL说成一次主题活动或成果展"],
+    links: ["未来PBL工具", "园本库", "AI项目资料整理", "教研服务"]
   },
   {
     id: "A2", type: "A", title: "主题课程、生成课程、项目课程有什么区别？",
     prompt: "请说明三类课程的区别，并举例说明销售在客户沟通时如何避免混淆。",
-    timeLimit: 120,
     tags: ["课程建设", "PBL", "园本课程"],
-    excellentPoints: ["主题课程偏预设脉络", "生成课程从儿童兴趣和现场事件生长", "项目课程强调问题驱动与持续探究", "要结合园所实施条件判断"],
-    deductionPoints: ["把三者说成完全对立", "只背术语，不解释真实工作场景"],
-    productLinks: ["课程资源", "园本库", "项目案例沉淀"]
+    points: ["主题课程偏预设脉络", "生成课程从儿童兴趣和现场事件生长", "项目课程强调问题驱动和持续探究"],
+    risks: ["把三者说成完全对立"],
+    links: ["课程资源", "园本库", "项目案例沉淀"]
   },
   {
     id: "A3", type: "A", title: "托幼一体化不是简单增加托班，它真正考验什么？",
     prompt: "请解释托幼一体化的核心，并说明0-3岁与3-6岁在课程、照护和家园沟通上的差异。",
-    timeLimit: 120,
     tags: ["托幼一体化", "0-3岁", "家园共育"],
-    excellentPoints: ["0-6岁连续服务体系", "0-3岁更强调照护、安全、依恋和家庭支持", "师资、空间、流程和合规边界要重新设计", "不能只把托育当成招生增收"],
-    deductionPoints: ["把托育等同幼儿园小班", "只讲招生增收，忽视照护安全和合规"],
-    productLinks: ["托幼场景共创", "师训", "成长档案", "家园沟通"]
+    points: ["0-6岁连续服务体系", "0-3岁更强调照护、安全、依恋和家庭支持", "师资、空间、流程和合规边界"],
+    risks: ["把托育等同幼儿园小班", "只讲招生增收"],
+    links: ["托幼场景共创", "师训", "成长档案", "家园沟通"]
   },
   {
     id: "A4", type: "A", title: "AI在幼儿园中应该扮演什么角色？",
     prompt: "请说明AI能帮助老师做什么、不能替代什么，以及销售沟通中需要提醒园所的风险边界。",
-    timeLimit: 120,
     tags: ["AI应用", "教师减负", "风险边界"],
-    excellentPoints: ["AI辅助初稿、整理、分析建议", "教师负责判断、审核和教育责任", "需要隐私、审核、使用规范", "不能承诺AI替代教师专业判断"],
-    deductionPoints: ["说AI可以替代教师", "忽视儿童数据和家长隐私"],
-    productLinks: ["AI工具箱", "AI成长营", "园本资料生成"]
-  },
-  {
-    id: "A5", type: "A", title: "科学幼小衔接和小学化有什么区别？",
-    prompt: "请说明科学幼小衔接的核心，并解释它和提前小学化训练的区别。",
-    timeLimit: 120,
-    tags: ["幼小衔接", "家长沟通", "课程建设"],
-    excellentPoints: ["科学幼小衔接关注身心准备、生活准备、社会准备和学习品质", "不是提前教拼音、识字、算术", "要帮助园所回应家长焦虑", "要用儿童发展证据说明课程价值"],
-    deductionPoints: ["把幼小衔接等同提前小学知识训练", "只迎合家长焦虑", "忽视儿童学习品质和生活能力"],
-    productLinks: ["家园沟通", "成长档案", "课程资源", "家长内容支持"]
-  },
-  {
-    id: "A6", type: "A", title: "园本教研闭环应该包含哪些关键环节？",
-    prompt: "请说明一个有效的园本教研闭环至少包含哪些环节，以及老师为什么常常难以坚持。",
-    timeLimit: 120,
-    tags: ["园本教研", "教师成长", "质量提升"],
-    excellentPoints: ["问题发现", "证据收集", "共同研讨", "行动改进", "实践复盘", "资料沉淀与复用", "教师需要低负担记录和持续反馈"],
-    deductionPoints: ["把教研等同开会或听讲座", "只讲培训课程，不讲实践证据和复盘机制"],
-    productLinks: ["教研服务", "教师成长", "园本库", "AI资料整理"]
+    points: ["AI辅助初稿、整理和建议", "教师负责判断与审核", "需要隐私、审核和使用规范"],
+    risks: ["说AI可以替代教师", "忽视儿童数据和家长隐私"],
+    links: ["AI工具箱", "AI成长营", "园本资料生成"]
   },
   {
     id: "B1", type: "B", title: "PBL异议",
-    customerRole: "园长", customerScript: "我们幼儿园是做PBL项目化学习的，你们产品不太符合我们的需求。",
+    customer: "园长：我们幼儿园是做PBL项目化学习的，你们产品不太符合我们的需求。",
     prompt: "请先追问园所真实需求，再回应这个异议，并说明幼师口袋后续可提供的支持。",
-    timeLimit: 360,
     tags: ["PBL", "异议处理", "产品共创"],
     mustAsk: ["贵园现在最难的是选题、项目推进、过程记录、评价还是成果展示？", "老师在项目中最常卡在哪一步？"],
-    excellentPoints: ["先认可园所专业探索", "说明PBL是问题驱动与持续探究", "把需求拆成项目路径、问题链、资源、记录、成果表达与园本沉淀", "连接未来PBL工具、园本库、AI支持与教研服务", "明确现有能力与规划能力边界"],
-    deductionPoints: ["直接说我们也有资源", "不懂PBL", "承诺马上定制"],
-    productLinks: ["未来PBL工具", "园本库", "AI项目资料整理", "教研服务"]
+    points: ["认可园所专业探索", "说明PBL是问题驱动与持续探究", "连接PBL工具、园本库、AI支持与教研服务"],
+    risks: ["直接说我们也有资源", "不懂PBL", "承诺马上定制"],
+    links: ["未来PBL工具", "园本库", "AI项目资料整理", "教研服务"]
   },
   {
     id: "B2", type: "B", title: "老师不愿用系统",
-    customerRole: "园长", customerScript: "老师已经很忙了，再上一个系统只会增加负担。",
+    customer: "园长：老师已经很忙了，再上一个系统只会增加负担。",
     prompt: "请先追问老师真实工作负担，再说明数字化工具如何进入园所日常流程。",
-    timeLimit: 300,
     tags: ["教师减负", "数字化", "慧园通"],
     mustAsk: ["老师现在最耗时的是重复录入、资料整理、家长沟通还是迎检材料？", "哪些资料会反复用？"],
-    excellentPoints: ["认可一线老师负担", "强调一次记录多次复用", "把系统嵌入真实流程", "连接园本库、班本库、AI整理、成长档案与教师档案"],
-    deductionPoints: ["否定老师", "只说系统功能多", "忽视使用成本"],
-    productLinks: ["慧园通", "园本库", "班本库", "AI整理", "成长档案"]
+    points: ["认可老师负担", "强调一次记录多次复用", "连接园本库、班本库、AI整理、成长档案"],
+    risks: ["否定老师", "只说系统功能多"],
+    links: ["慧园通", "园本库", "班本库", "AI整理", "成长档案"]
   },
   {
     id: "B3", type: "B", title: "观察记录困难",
-    customerRole: "园长", customerScript: "老师不会写观察记录，写了也感觉没什么用。",
+    customer: "园长：老师不会写观察记录，写了也感觉没什么用。",
     prompt: "请判断这背后的专业问题，并给出产品、培训与教研结合的解决方案。",
-    timeLimit: 300,
     tags: ["观察记录", "儿童评价", "教师成长"],
-    mustAsk: ["这些记录最后给谁看？", "用于家长沟通、教研分析、儿童评价还是检查归档？", "写完以后园里如何使用？"],
-    excellentPoints: ["指出问题不只是写作能力", "说明目的、结构和使用机制", "建议真实行为、发展分析、下一步支持", "连接成长档案、AI辅助分析与教研培训"],
-    deductionPoints: ["把观察等同拍照", "说AI自动评价儿童"],
-    productLinks: ["成长档案", "观察记录", "AI辅助分析", "教研培训"]
+    mustAsk: ["这些记录最后给谁看？", "用于家长沟通、教研分析、儿童评价还是检查归档？"],
+    points: ["问题不只是写作能力", "要明确目的、结构和使用机制", "连接成长档案、AI辅助分析与教研培训"],
+    risks: ["把观察等同拍照", "说AI自动评价儿童"],
+    links: ["成长档案", "观察记录", "AI辅助分析", "教研培训"]
   },
   {
     id: "B4", type: "B", title: "已有竞品系统",
-    customerRole: "园长", customerScript: "我们已经有系统了，为什么还需要你们？",
+    customer: "园长：我们已经有系统了，为什么还需要你们？",
     prompt: "请不贬低竞品地完成问诊，说明幼师口袋在学前教育场景中的差异价值。",
-    timeLimit: 300,
     tags: ["竞品异议", "产品定位", "慧园通"],
     mustAsk: ["现有系统主要解决行政、家园、资源、教师成长还是课程教研？", "老师使用最多和最少的是哪些模块？"],
-    excellentPoints: ["先定位现有系统已解决的部分", "不否定竞品", "强调幼师口袋在专业内容、教师成长、园本资源、AI场景化支持上的差异", "判断是否有互补入口或替换价值"],
-    deductionPoints: ["贬低竞品", "没问清现有系统", "只讲我们功能更多"],
-    productLinks: ["慧园通", "专业内容资源", "教师成长", "AI工具箱"]
+    points: ["先定位现有系统已解决部分", "不否定竞品", "强调专业内容、教师成长、园本资源和AI场景支持"],
+    risks: ["贬低竞品", "没问清现有系统"],
+    links: ["慧园通", "专业内容资源", "教师成长", "AI工具箱"]
   },
   {
     id: "B5", type: "B", title: "托幼一体化转型",
-    customerRole: "园长", customerScript: "现在政策和家长需求都在提托幼一体化，我们也想把幼儿园资源延伸到0-3岁托育，但不知道怎么做。你们能支持吗？",
+    customer: "园长：我们想把幼儿园资源延伸到0-3岁托育，但不知道怎么做。你们能支持吗？",
     prompt: "请先拆解园所转型需求，再说明幼师口袋可支持的产品、内容、培训与共创方向。",
-    timeLimit: 360,
     tags: ["托幼一体化", "0-3岁", "产品共创"],
     mustAsk: ["园所想做的是托班、亲子课、托育服务、0-6成长服务，还是集团化托幼品牌？", "现有场地、师资、招生、照护流程和家长需求分别是什么？"],
-    excellentPoints: ["先区分托幼一体化不是简单加托班", "拆成儿童发展与照护、安全流程、师资培训、家长服务、课程资源、数字化档案与运营管理", "提醒合规与照护安全边界", "连接内容资源、师训、成长档案、家园沟通、AI工具和托幼场景共创"],
-    deductionPoints: ["只讲招生增收", "把托育等同幼儿园小班", "忽视人员资质和合规边界"],
-    productLinks: ["托幼场景共创", "内容资源", "师训", "成长档案", "家园沟通"]
+    points: ["托幼一体化不是简单加托班", "拆成照护、安全流程、师资培训、家长服务、课程资源、数字化档案", "提醒合规边界"],
+    risks: ["只讲招生增收", "把托育等同幼儿园小班", "忽视人员资质和合规"],
+    links: ["托幼场景共创", "内容资源", "师训", "成长档案", "家园沟通"]
   },
   {
     id: "C1", type: "C", title: "PBL压测追问",
-    customerRole: "考官", customerScript: "你刚才提到PBL，请用一句话说清楚它和主题活动最大的区别。",
+    customer: "考官：你刚才提到PBL，请用一句话说清楚它和主题活动最大的区别。",
     prompt: "请在1分钟内回答，重点考察概念准确性和表达清晰度。",
-    timeLimit: 90,
     tags: ["PBL", "专业压测"],
-    excellentPoints: ["主题活动通常围绕预设主题展开", "PBL围绕真实问题持续探究并形成过程证据和成果表达"],
-    deductionPoints: ["把PBL等同主题活动", "用术语堆砌但解释不清"],
-    productLinks: ["PBL工具", "园本库"]
+    points: ["主题活动通常围绕预设主题展开", "PBL围绕真实问题持续探究并形成过程证据和成果表达"],
+    risks: ["把PBL等同主题活动"],
+    links: ["PBL工具", "园本库"]
   },
   {
     id: "C2", type: "C", title: "产品边界追问",
-    customerRole: "考官", customerScript: "你们现在有哪些功能已经能支持，哪些还在规划？",
+    customer: "考官：你们现在有哪些功能已经能支持，哪些还在规划？",
     prompt: "请清楚区分现有能力、在研方向和可共创内容。",
-    timeLimit: 90,
     tags: ["产品理解", "承诺边界"],
-    excellentPoints: ["明确现有能力与规划能力", "不把未来功能当现有功能销售", "说明可以共创评估但不轻易承诺上线时间"],
-    deductionPoints: ["马上承诺定制", "说不清当前产品能力"],
-    productLinks: ["慧园通", "AI工具箱", "产品共创"]
+    points: ["明确现有能力与规划能力", "不把未来功能当现有功能销售", "说明可以共创评估但不承诺上线时间"],
+    risks: ["马上承诺定制", "说不清当前产品能力"],
+    links: ["慧园通", "AI工具箱", "产品共创"]
   },
   {
     id: "C3", type: "C", title: "需求反馈追问",
-    customerRole: "考官", customerScript: "你如何判断这是一个园的定制需求，还是可复制产品机会？",
+    customer: "考官：你如何判断这是一个园的定制需求，还是可复制产品机会？",
     prompt: "请说明你会记录哪些信息，并如何初步判断产品价值。",
-    timeLimit: 90,
     tags: ["需求反馈", "产品共创"],
-    excellentPoints: ["记录客户原话、真实场景、使用角色、工作流程、频率、痛点、期望结果", "判断可复制性、优先级、成功标准", "区分产品化、服务化和定制化"],
-    deductionPoints: ["只记录一句客户想法", "没有场景和成功标准"],
-    productLinks: ["产品需求卡", "共创机制"]
+    points: ["记录客户原话、真实场景、角色、流程、频率、痛点、期望结果", "判断可复制性、优先级、成功标准"],
+    risks: ["只记录一句客户想法"],
+    links: ["产品需求卡", "共创机制"]
   },
   {
     id: "C4", type: "C", title: "托幼风险追问",
-    customerRole: "考官", customerScript: "如果客户只是想靠托班增收，你如何提醒风险？",
+    customer: "考官：如果客户只是想靠托班增收，你如何提醒风险？",
     prompt: "请说明托幼一体化沟通中必须提醒园所注意的风险边界。",
-    timeLimit: 90,
     tags: ["托幼一体化", "风险边界"],
-    excellentPoints: ["提醒托育不是简单招生增收", "关注照护安全、人员资质、空间流程、家庭支持和合规", "建议先做小范围试点和能力评估"],
-    deductionPoints: ["只迎合客户增收诉求", "忽视安全与合规"],
-    productLinks: ["托幼场景共创", "师训", "运营流程"]
+    points: ["托育不是简单招生增收", "关注照护安全、人员资质、空间流程、家庭支持和合规", "建议先做小范围试点和能力评估"],
+    risks: ["只迎合客户增收诉求"],
+    links: ["托幼场景共创", "师训", "运营流程"]
   }
 ];
 
@@ -199,36 +160,32 @@ export interface Answer {
   audioCaptured: boolean;
 }
 
-export type FlagType = 'risk' | 'warning' | 'ok';
-
-export interface Flag {
-  type: FlagType;
-  text: string;
-}
-
 export interface Dimension {
   key: string;
   name: string;
-  score: number;
   max: number;
-  pct: number;
-  note: string;
-  comment?: string;
+  score: number;
+  comment: string;
+  evidence: string;
+}
+
+export interface Flag {
+  type: string;
+  text: string;
 }
 
 export interface Report {
-  id?: string;
+  id: string;
+  createdAt: string;
   candidate: Candidate;
-  questions?: { id: string; title: string; type: 'A' | 'B' | 'C'; tags: string[] }[];
-  answers?: Answer[];
+  questions: { id: string; title: string; type: string; tags: string[] }[];
+  answers: Answer[];
+  dimensions: Dimension[];
   total: number;
   grade: string;
   conclusion: string;
-  dimensions: Dimension[];
   strengths: string[];
   weaknesses: string[];
   flags: Flag[];
-  source: 'ai' | 'local_rule';
-  examCode?: string;
-  createdAt?: string;
+  source: string;
 }
