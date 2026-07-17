@@ -1,4 +1,4 @@
-import { RUBRIC, type Answer, type Question, type Dimension, type Flag } from './exam-data';
+import { RUBRIC, type Answer, type Question, type Dimension, type Flag, type Report } from './exam-data';
 
 function scoreText(text: string, max: number, words: string[], floor = 1): number {
   const hit = words.reduce((n, w) => n + (text.includes(w) ? 1 : 0), 0);
@@ -34,7 +34,7 @@ export function makeLocalReport(
   candidate: { name: string; department: string; code: string },
   questions: Question[],
   answers: Answer[]
-) {
+): Report {
   const text = answers.map(a => a.transcript).join("。");
   const risky = ["马上上线", "一定上线", "包过", "替代老师", "竞品不专业", "免费定制"].filter(w => text.includes(w));
   const dims: Dimension[] = RUBRIC.map(r => {
@@ -46,6 +46,8 @@ export function makeLocalReport(
       name: r.name,
       max: r.max,
       score: s,
+      pct: Math.round((s / r.max) * 100),
+      note: evidence(text, r.words),
       comment: s / r.max >= 0.72 ? `${r.name}表现较好。` : `${r.name}需要补强。`,
       evidence: evidence(text, r.words)
     };
